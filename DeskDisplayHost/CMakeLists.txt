@@ -18,6 +18,6 @@ pico_add_extra_outputs(deskdisplay)
 # add url via pico_set_program_url
 # example_auto_set_url(deskdisplay)
 
-target_link_libraries(deskdisplay pico_stdlib hardware_pio)
+target_link_libraries(deskdisplay pico_stdlib hardware_pio hardware_flash hardware_sync)
 
 pico_generate_pio_header(deskdisplay ${CMAKE_CURRENT_LIST_DIR}/dependencies/WS2812.pio)

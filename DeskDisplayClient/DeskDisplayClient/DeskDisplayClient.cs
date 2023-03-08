@@ -28,7 +28,7 @@ class DeskDisplay
             }
 
             // Send displayMode
-            WriteToSerialPort(serialPort, new byte[] { (byte)Constants.DisplayMode.Solid });
+            WriteToSerialPort(serialPort, new byte[] { (byte)Constants.DisplayMode.Pulse });
 
             // Prepare data to be written
             ledValues = new byte[Constants.DATA_LENGTH];
@@ -41,7 +41,7 @@ class DeskDisplay
             }
 
             // Write data
-            WriteToSerialPort(serialPort, ledValues);
+            //WriteToSerialPort(serialPort, ledValues);
         }
         finally
         {

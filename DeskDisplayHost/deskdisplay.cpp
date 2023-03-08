@@ -2,6 +2,8 @@
 #include "pico/stdlib.h"
 #include "hardware/gpio.h"
 #include "dependencies/WS2812.hpp"
+#include <hardware/flash.h>
+#include <hardware/sync.h>
 
 //include Constants.cs as a C++ file
 #define class namespace
@@ -21,7 +23,8 @@
 #define STATUS_LED 25
 #define STRIP_UPDATE_DELAY 10
 #define REFRESH_INTERVAL_MS 5
-#define FLASH_TARGET_OFFSET (256 * 1024)
+#define FLASH_OFFSET 0x00100000u
+#define FLASH_MEM_START (XIP_BASE + FLASH_OFFSET)
 
 // Raspberry pi GPIO
 /*
@@ -37,14 +40,17 @@ void receiveData(uint8_t data[], int pageSize, int dataSize);
 void setLeds(uint8_t data[], WS2812 ledStrip);
 void displayModeInit(uint8_t displayMode, uint8_t data[], WS2812* ledStrip);
 void displayModeUpdate(uint8_t displayMode, uint8_t data[], WS2812* ledStrip, uint8_t deltaTime);
+void displayModeReload(uint8_t displayMode, uint8_t data[], WS2812* ledStrip);
 uint8_t displayModeGet();
+void writeFlash(uint8_t data[]);
+void readFlash(uint8_t data[]);
 
 int main() {
 
     bool statusLed = true;
     int16_t b;
     uint counter = 0;
-    uint8_t data[Constants::DATA_LENGTH + 1];
+    uint8_t data[((Constants::DATA_LENGTH + FLASH_SECTOR_SIZE) / FLASH_SECTOR_SIZE) * FLASH_SECTOR_SIZE];
     uint i, j;
     uint8_t displayMode = Constants::DisplayMode::Solid;
     uint16_t heartbeatTimer = 0;
@@ -66,7 +72,12 @@ int main() {
         0,
         WS2812::FORMAT_GRB
     );
-    
+
+    // Read data from flash
+    readFlash(data);
+    displayMode = data[Constants::DATA_LENGTH + 2];
+
+    displayModeReload(displayMode, data, &ledStrip);
 
     while (true) {
 
@@ -188,6 +199,10 @@ void displayModeInit(uint8_t displayMode, uint8_t data[], WS2812* ledStrip)
         sleep_ms(STRIP_UPDATE_DELAY);
         break;
     }
+
+    // Write data to flash
+    data[Constants::DATA_LENGTH + 2] = displayMode;
+    writeFlash(data);
 }
 
 void displayModeUpdate(uint8_t displayMode, uint8_t data[], WS2812* ledStrip, uint8_t deltaTime)
@@ -195,13 +210,55 @@ void displayModeUpdate(uint8_t displayMode, uint8_t data[], WS2812* ledStrip, ui
     // Display based on displaymode
     switch (displayMode)
     {
-    case (uint8_t) Constants::DisplayMode::Solid:
-        break;
-
     case (uint8_t) Constants::DisplayMode::Pulse: // TODO
         break;
 
     default:
         break;
+    }
+}
+
+void displayModeReload(uint8_t displayMode, uint8_t data[], WS2812* ledStrip)
+{
+    switch (displayMode)
+    {
+    case (uint8_t) Constants::DisplayMode::Solid:
+        setLeds(data, (*ledStrip));
+        (*ledStrip).show();
+        sleep_ms(STRIP_UPDATE_DELAY);
+        break;
+
+    case (uint8_t) Constants::DisplayMode::Pulse: // TODO
+        break;
+
+    default: // FIXME Always lands here
+        setLeds(data, (*ledStrip));
+        (*ledStrip).show();
+        sleep_ms(STRIP_UPDATE_DELAY);
+        break;
+    }
+}
+
+void writeFlash(uint8_t data[])
+{
+    size_t count = ((Constants::DATA_LENGTH + FLASH_SECTOR_SIZE) / FLASH_SECTOR_SIZE) * FLASH_SECTOR_SIZE;
+    uint32_t interrupts = save_and_disable_interrupts();
+
+    for (int i = 0; i < Constants::DATA_LENGTH + 1; i += FLASH_SECTOR_SIZE)
+    {
+        flash_range_erase(FLASH_OFFSET, FLASH_SECTOR_SIZE);
+    }
+    flash_range_program(FLASH_OFFSET, data, count);
+
+    restore_interrupts (interrupts);
+}
+
+void readFlash(uint8_t data[])
+{
+    const uint8_t* flashData = (const uint8_t *) FLASH_MEM_START;
+
+    for (int i = 0; i < Constants::DATA_LENGTH + 1; i++)
+    {
+        data[i] = flashData[i];
     }
 }
