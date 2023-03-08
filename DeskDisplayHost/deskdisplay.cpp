@@ -21,6 +21,7 @@
 #define STATUS_LED 25
 #define STRIP_UPDATE_DELAY 10
 #define REFRESH_INTERVAL_MS 5
+#define FLASH_TARGET_OFFSET (256 * 1024)
 
 // Raspberry pi GPIO
 /*
@@ -36,6 +37,7 @@ void receiveData(uint8_t data[], int pageSize, int dataSize);
 void setLeds(uint8_t data[], WS2812 ledStrip);
 void displayModeInit(uint8_t displayMode, uint8_t data[], WS2812* ledStrip);
 void displayModeUpdate(uint8_t displayMode, uint8_t data[], WS2812* ledStrip, uint8_t deltaTime);
+uint8_t displayModeGet();
 
 int main() {
 
@@ -68,37 +70,36 @@ int main() {
 
     while (true) {
 
-        // Wait until USB is connected
-        while(!stdio_usb_connected()) {
-            sleep_ms(REFRESH_INTERVAL_MS);
+        // If there is a usb connection, attempt to get an new displayMode.
+        if (stdio_usb_connected())
+        {
+            // Clear buffer
+            while (getchar_timeout_us(100) != PICO_ERROR_TIMEOUT);
 
-            heartbeatTimer += REFRESH_INTERVAL_MS;
-            if (heartbeatTimer > 1000) {
-                gpio_put(STATUS_LED, statusLed);
-                statusLed = !statusLed;
-                heartbeatTimer = 0;
-            }
+            // Handshake
+            printf("%s\n", Constants::ROM_ID);
+            sleep_ms(10);
 
-            displayModeUpdate(displayMode, data, &ledStrip, REFRESH_INTERVAL_MS);
+            // Get displayMode
+            displayMode = displayModeGet();
+
+            // Initialize displayMode
+            displayModeInit(displayMode, data, &ledStrip);
         }
 
-        // Clear buffer
-        while (getchar_timeout_us(100) != PICO_ERROR_TIMEOUT);
+        // Update the ledStrip
+        displayModeUpdate(displayMode, data, &ledStrip, REFRESH_INTERVAL_MS);
 
-        // Handshake
-        printf("%s\n", Constants::ROM_ID);
-        sleep_ms(10);
+        // Sleep
+        sleep_ms(REFRESH_INTERVAL_MS);
 
-        // Get displaymode
-        displayMode = getchar_timeout_us(50000);
-        putchar(displayMode);
-        stdio_flush();
-        sleep_ms(Constants::PC_TO_PICO_TIMEOUT_MS);
-
-        displayModeInit(displayMode, data, &ledStrip);
-
-        ledStrip.show();
-        sleep_ms(STRIP_UPDATE_DELAY);
+        // Heartbeat every second
+        heartbeatTimer += REFRESH_INTERVAL_MS;
+        if (heartbeatTimer > 1000) {
+            gpio_put(STATUS_LED, statusLed);
+            statusLed = !statusLed;
+            heartbeatTimer = 0;
+        }
     }
 }
 
@@ -153,6 +154,16 @@ void receiveData(uint8_t data[], int pageSize, int dataSize)
     }
 }
 
+uint8_t displayModeGet()
+{
+    uint8_t displayMode = getchar_timeout_us(50000);
+    putchar(displayMode);
+    stdio_flush();
+    sleep_ms(Constants::PC_TO_PICO_TIMEOUT_MS);
+
+    return displayMode;
+}
+
 void displayModeInit(uint8_t displayMode, uint8_t data[], WS2812* ledStrip)
 {
     // Display based on displaymode
@@ -161,13 +172,20 @@ void displayModeInit(uint8_t displayMode, uint8_t data[], WS2812* ledStrip)
     case (uint8_t) Constants::DisplayMode::Solid:
         receiveData(data, Constants::SERIAL_PAGE_SIZE, Constants::DATA_LENGTH);
         setLeds(data, *ledStrip);
+        (*ledStrip).show();
+        sleep_ms(STRIP_UPDATE_DELAY);
         break;
-    case (uint8_t) Constants::DisplayMode::Pulse:
+
+    case (uint8_t) Constants::DisplayMode::Pulse: // TODO
         (*ledStrip).fill(WS2812::RGB(0xFF, 0x00, 0x00));
+        (*ledStrip).show();
+        sleep_ms(STRIP_UPDATE_DELAY);
         break;
     
     default:
         (*ledStrip).fill(WS2812::RGB(0x00, 0xFF, 0x00));
+        (*ledStrip).show();
+        sleep_ms(STRIP_UPDATE_DELAY);
         break;
     }
 }
@@ -179,7 +197,8 @@ void displayModeUpdate(uint8_t displayMode, uint8_t data[], WS2812* ledStrip, ui
     {
     case (uint8_t) Constants::DisplayMode::Solid:
         break;
-    case (uint8_t) Constants::DisplayMode::Pulse:
+
+    case (uint8_t) Constants::DisplayMode::Pulse: // TODO
         break;
 
     default:
