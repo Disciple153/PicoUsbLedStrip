@@ -3,12 +3,22 @@
 #include "hardware/gpio.h"
 #include "dependencies/WS2812.hpp"
 
+//include version information into a .cpp
+#define class namespace
+#define public
+#define static
+#define string const char*
+#include "../Constants.cs" //or to where-ever your file is
+;
+#undef class
+#undef public
+#undef static
+#undef string
+
+
 #define LED_STRIP_PIN 0
-#define LED_STRIP_LENGTH 96
 #define STATUS_LED 25
-#define DATA_LENGTH ((LED_STRIP_LENGTH * 3) + 1)
 #define STRIP_UPDATE_DELAY 10
-#define SERIAL_PAGE_SIZE 512 // If there are problems transmitting bytes, lower this.
 
 // Raspberry pi GPIO
 /*
@@ -20,12 +30,13 @@ data    yellow  GP0
 
 */
 
+
 int main() {
 
     bool statusLed = true;
     int16_t b;
     uint counter = 0;
-    uint8_t data[DATA_LENGTH];
+    uint8_t data[Constants::DATA_LENGTH + 1];
     uint i, j;
 
     stdio_init_all(); // Initialize usb
@@ -40,7 +51,7 @@ int main() {
     // Initialize LED strip
     WS2812 ledStrip(
         LED_STRIP_PIN,
-        LED_STRIP_LENGTH,
+        Constants::LED_STRIP_LENGTH,
         pio0,
         0,
         WS2812::FORMAT_GRB
@@ -58,19 +69,19 @@ int main() {
         while (getchar_timeout_us(100) != PICO_ERROR_TIMEOUT);
 
         // Handshake
-        printf("DeskDisplay\n");
+        printf("%s\n", Constants::ROM_ID);
         sleep_ms(10);
 
         // Recieve data in chunks
         b, i = 0;
         while (b != PICO_ERROR_TIMEOUT &&
-                i < DATA_LENGTH - 1)
+                i < Constants::DATA_LENGTH)
         {
             // Read next line
             j = 0;
             while (b != PICO_ERROR_TIMEOUT &&
-                    j < SERIAL_PAGE_SIZE &&
-                    i < DATA_LENGTH - 1)
+                    j < Constants::SERIAL_PAGE_SIZE &&
+                    i < Constants::DATA_LENGTH)
             {
                 b = getchar_timeout_us(100000);
                 data[i] = (uint8_t) b;
@@ -93,7 +104,7 @@ int main() {
 
         // Display data received
         i = 0;
-        while (i < LED_STRIP_LENGTH) {
+        while (i < Constants::LED_STRIP_LENGTH) {
 
             ledStrip.setPixelColor(i,
                 WS2812::RGB(

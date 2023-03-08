@@ -1,16 +1,19 @@
 ﻿// See https://aka.ms/new-console-template for more information
+using Microsoft.Win32;
 using System.IO.Ports;
 using System.Text;
+using System.Text.RegularExpressions;
 
 class DeskDisplay
 {
-
-    const int LED_STRIP_LENGTH = 96;
-    const int DATA_LENGTH = (LED_STRIP_LENGTH * 3);
+    const string VID = "2E8A";
+    const string PID = "000A";
 
     static void Main(string[] args)
     {
         SerialPort? serialPort = null;
+
+        Console.WriteLine(Constants.DisplayMode.Solid);
 
         try
         {
@@ -24,13 +27,13 @@ class DeskDisplay
             }
 
             // Prepare data to be written
-            byte[] ledValues = new byte[DATA_LENGTH];
+            byte[] ledValues = new byte[Constants.DATA_LENGTH];
 
-            for (int i = 0; i < LED_STRIP_LENGTH; i++)
+            for (int i = 0; i < Constants.LED_STRIP_LENGTH; i++)
             {//9e34eb
-                ledValues[(3 * i) + 0] = 0x9E;// (byte)((0xFF * i) / LED_STRIP_LENGTH);
-                ledValues[(3 * i) + 1] = 0x34;// (byte)((0xFF * i) / LED_STRIP_LENGTH);
-                ledValues[(3 * i) + 2] = 0xEB;// (byte)((0xFF * i) / LED_STRIP_LENGTH);
+                ledValues[(3 * i) + 0] = 0x80;// (byte)((0xFF * i) / LED_STRIP_LENGTH);
+                ledValues[(3 * i) + 1] = 0x00;// (byte)((0xFF * i) / LED_STRIP_LENGTH);
+                ledValues[(3 * i) + 2] = 0xFF;// (byte)((0xFF * i) / LED_STRIP_LENGTH);
             }
 
             // Write data
@@ -49,7 +52,7 @@ class DeskDisplay
     private static void WriteToSerialPort(SerialPort serialPort, byte[] ledValues)
     {
         int offset = 0;
-        int count = 512; // If there are problems transmitting bytes, lower this.
+        int count = Constants.SERIAL_PAGE_SIZE; // If there are problems transmitting bytes, lower this.
 
         // Write data and confirm it was received
         while (offset + count < ledValues.Length)
@@ -122,12 +125,46 @@ class DeskDisplay
         return result;
     }
 
+    // FIXME Windows only
+    static List<string> ComPortNames(String VID, String PID)
+    {
+        String pattern = String.Format("^VID_{0}.PID_{1}", VID, PID);
+        Regex _rx = new Regex(pattern, RegexOptions.IgnoreCase);
+        List<string> comports = new List<string>();
+
+        RegistryKey rk1 = Registry.LocalMachine;
+        RegistryKey rk2 = rk1.OpenSubKey("SYSTEM\\CurrentControlSet\\Enum");
+
+        foreach (String s3 in rk2.GetSubKeyNames())
+        {
+            RegistryKey rk3 = rk2.OpenSubKey(s3);
+            foreach (String s in rk3.GetSubKeyNames())
+            {
+                //Console.WriteLine("RK3: " + s);
+                if (_rx.Match(s).Success)
+                {
+                    RegistryKey rk4 = rk3.OpenSubKey(s);
+                    foreach (String s2 in rk4.GetSubKeyNames())
+                    {
+                        RegistryKey rk5 = rk4.OpenSubKey(s2);
+                        string location = (string)rk5.GetValue("LocationInformation");
+                        RegistryKey rk6 = rk5.OpenSubKey("Device Parameters");
+                        string portName = (string)rk6.GetValue("PortName");
+                        if (!String.IsNullOrEmpty(portName) && SerialPort.GetPortNames().Contains(portName))
+                            comports.Add((string)rk6.GetValue("PortName"));
+                    }
+                }
+            }
+        }
+        return comports;
+    }
+
     private static SerialPort? GetSerialPort()
     {
         string deviceName;
         SerialPort? serialPort = null;
 
-        foreach (String portName in SerialPort.GetPortNames())
+        foreach (String portName in ComPortNames(VID, PID))
         {
             Console.WriteLine(portName);
 
@@ -151,6 +188,11 @@ class DeskDisplay
             {
                 deviceName = serialPort.ReadLine();
                 Console.WriteLine("Device Name: " + deviceName);
+
+                if (deviceName == Constants.ROM_ID)  
+                {
+                    break;
+                }
             }
             catch (TimeoutException)
             {
