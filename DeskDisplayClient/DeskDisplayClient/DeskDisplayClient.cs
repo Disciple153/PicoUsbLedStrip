@@ -12,6 +12,7 @@ class DeskDisplay
     static void Main(string[] args)
     {
         SerialPort? serialPort = null;
+        byte[] ledValues;
 
         Console.WriteLine(Constants.DisplayMode.Solid);
 
@@ -26,8 +27,11 @@ class DeskDisplay
                 throw new Exception("DeskDisplay not found.");
             }
 
+            // Send displayMode
+            WriteToSerialPort(serialPort, new byte[] { (byte)Constants.DisplayMode.Solid });
+
             // Prepare data to be written
-            byte[] ledValues = new byte[Constants.DATA_LENGTH];
+            ledValues = new byte[Constants.DATA_LENGTH];
 
             for (int i = 0; i < Constants.LED_STRIP_LENGTH; i++)
             {//9e34eb

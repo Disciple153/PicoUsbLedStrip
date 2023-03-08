@@ -6,6 +6,8 @@
 
 class WS2812 {
     public:
+        uint length;
+
         enum DataByte {
             NONE=0,
             RED=1,
@@ -43,7 +45,6 @@ class WS2812 {
 
     private:
         uint pin;
-        uint length;
         PIO pio;
         uint sm;
         DataByte bytes[4];
