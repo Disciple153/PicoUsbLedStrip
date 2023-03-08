@@ -1,54 +1,20 @@
 ﻿// See https://aka.ms/new-console-template for more information
-using System.Collections;
 using System.IO.Ports;
-using System.Management;
 using System.Text;
 
 class DeskDisplay
 {
 
-    const int LED_STRIP_PIN = 28;
     const int LED_STRIP_LENGTH = 96;
-    const int STATUS_LED = 25;
     const int DATA_LENGTH = (LED_STRIP_LENGTH * 3);
 
     static void Main(string[] args)
     {
         SerialPort? serialPort = null;
-        String deviceName;
 
         try
         {
-            foreach (String portName in SerialPort.GetPortNames())
-            {
-                Console.WriteLine(portName);
-
-                serialPort = new SerialPort(portName);
-                serialPort.ReadTimeout = 10;
-                serialPort.BaudRate = 115200;
-                serialPort.RtsEnable = true;
-                serialPort.DtrEnable = true;
-
-                try
-                {
-                    serialPort.Open();
-                }
-                catch (IOException)
-                {
-                    continue;
-                }
-
-                try
-                {
-                    deviceName = serialPort.ReadLine();
-                    Console.WriteLine("Device Name: " + deviceName);
-                }
-                catch (TimeoutException)
-                {
-                    serialPort.Close();
-                    continue;
-                }
-            }
+            serialPort = GetSerialPort();
 
             Console.WriteLine("1");
             if (serialPort == null || !serialPort.IsOpen)
@@ -57,49 +23,17 @@ class DeskDisplay
             }
             Console.WriteLine("2");
 
-
-
+            // Prepare data to be written
             byte[] ledValues = new byte[DATA_LENGTH];
 
-            int j = 1;
-            // Write data
             for (int i = 0; i < LED_STRIP_LENGTH; i++)
             {
-                ledValues[(3 * i) + 0] = (byte) 255;
-                ledValues[(3 * i) + 1] = (byte) 255;
-                ledValues[(3 * i) + 2] = (byte) 255;
+                ledValues[(3 * i) + 0] = (byte)(i + 1);
+                ledValues[(3 * i) + 1] = (byte)(i + 1);
+                ledValues[(3 * i) + 2] = (byte)(i + 1);
             }
 
-            Console.WriteLine("LedData: " + Convert.ToHexString(ledValues));
-
-            serialPort.Write(ledValues, 0, ledValues.Length);
-            serialPort.Close();
-
-            Console.WriteLine("3");
-
-            // Recieve copy
-            //String copy = serialPort.ReadLine();
-
-            List<byte> copy = new List<byte>();
-            bool timeout = false;
-
-            serialPort.Open();
-            while (!timeout)
-            {
-                try
-                {
-                    copy.Add((byte) serialPort.ReadByte());
-                }
-                catch (TimeoutException)
-                {
-                    timeout = true;
-                }
-            }
-
-            Console.WriteLine(Encoding.Default.GetString(copy.ToArray()));
-            Console.WriteLine(Convert.ToHexString(copy.ToArray()));
-
-            //Console.WriteLine(copy);
+            WriteToSerialPort(serialPort, ledValues);
 
             Console.WriteLine("4");
 
@@ -114,4 +48,115 @@ class DeskDisplay
             }
         }
     }
+
+    private static void WriteToSerialPort(SerialPort serialPort, byte[] ledValues)
+    {
+        // Write data
+        List<byte> copy;
+        int offset = 0;
+        int count = 16;
+        while (offset + count < ledValues.Length)
+        {
+            serialPort.Write(ledValues, offset, count);
+            //copy = Receive(serialPort);
+            Confirm(serialPort, new List<byte>(ledValues).GetRange(offset, count));
+            offset += count;
+        }
+
+        serialPort.Write(ledValues, offset, ledValues.Length - offset);
+        Confirm(serialPort, new List<byte>(ledValues).GetRange(offset, ledValues.Length - offset));
+    }
+
+    static bool Confirm(SerialPort serialPort, List<byte> data)
+    {
+        bool result = true;
+        byte received;
+
+        foreach (byte b in data)
+        {
+            try
+            {
+                received = (byte)serialPort.ReadByte();
+                result = b == received;
+                if (result)
+                {
+                    Console.WriteLine("Recieved: " + b.ToString("X"));
+                }
+                else
+                {
+                    Console.WriteLine("Expected: " + b.ToString("X") +
+                        " Recieved: " + received.ToString("X"));
+                }
+            }
+            catch (TimeoutException)
+            {
+                Console.WriteLine("No input");
+                break;
+            }
+        }
+        Console.WriteLine();
+
+        return result;
+    }
+
+    private static SerialPort? GetSerialPort()
+    {
+        string deviceName;
+        SerialPort? serialPort = null;
+
+        foreach (String portName in SerialPort.GetPortNames())
+        {
+            Console.WriteLine(portName);
+
+            serialPort = new SerialPort(portName);
+            serialPort.ReadTimeout = 100;
+            serialPort.WriteTimeout = 1000;
+            serialPort.BaudRate = 115200;
+            serialPort.RtsEnable = true;
+            serialPort.DtrEnable = true;
+
+            try
+            {
+                serialPort.Open();
+            }
+            catch (IOException)
+            {
+                continue;
+            }
+
+            try
+            {
+                deviceName = serialPort.ReadLine();
+                Console.WriteLine("Device Name: " + deviceName);
+            }
+            catch (TimeoutException)
+            {
+                serialPort.Close();
+                continue;
+            }
+        }
+
+        return serialPort;
+    }
+
+    static List<byte> Receive(SerialPort serialPort)
+    {
+        List<byte> data = new List<byte>();
+        bool timeout = false;
+
+        while (!timeout)
+        {
+            try
+            {
+                data.Add((byte)serialPort.ReadByte());
+            }
+            catch (TimeoutException)
+            {
+                timeout = true;
+            }
+        }
+
+        return data;
+    }
+
 }
