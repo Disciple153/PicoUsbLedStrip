@@ -14,14 +14,14 @@ class DeskDisplay
 
         try
         {
+            // Get the deskDisplay serialPort
             serialPort = GetSerialPort();
 
-            Console.WriteLine("1");
+            // Make sure serialPort was successfully found
             if (serialPort == null || !serialPort.IsOpen)
             {
                 throw new Exception("DeskDisplay not found.");
             }
-            Console.WriteLine("2");
 
             // Prepare data to be written
             byte[] ledValues = new byte[DATA_LENGTH];
@@ -33,15 +33,12 @@ class DeskDisplay
                 ledValues[(3 * i) + 2] = (byte)(i + 1);
             }
 
+            // Write data
             WriteToSerialPort(serialPort, ledValues);
-
-            Console.WriteLine("4");
-
-            serialPort.Close();
-            Console.WriteLine("5");
         }
         finally
         {
+            // Close serialPort
             if (serialPort != null && serialPort.IsOpen)
             {
                 serialPort.Close();
@@ -51,41 +48,68 @@ class DeskDisplay
 
     private static void WriteToSerialPort(SerialPort serialPort, byte[] ledValues)
     {
-        // Write data
-        List<byte> copy;
         int offset = 0;
-        int count = 16;
+        int count = 8;
+
+        // Write data and confirm it was received
         while (offset + count < ledValues.Length)
         {
             serialPort.Write(ledValues, offset, count);
-            //copy = Receive(serialPort);
-            Confirm(serialPort, new List<byte>(ledValues).GetRange(offset, count));
+            Confirm(serialPort, new List<byte>(ledValues).GetRange(offset, count)); // TODO throw exception on false
             offset += count;
         }
 
+        // Write the final chunk of data and confirm it was received
         serialPort.Write(ledValues, offset, ledValues.Length - offset);
-        Confirm(serialPort, new List<byte>(ledValues).GetRange(offset, ledValues.Length - offset));
+        Confirm(serialPort, new List<byte>(ledValues).GetRange(offset, ledValues.Length - offset)); // TODO throw exception on false
     }
 
     static bool Confirm(SerialPort serialPort, List<byte> data)
     {
+        bool thisResult;
         bool result = true;
         byte received;
+        byte prev = 0;
 
+        // Get and confirm data until the read operation times out
         foreach (byte b in data)
         {
             try
             {
-                received = (byte)serialPort.ReadByte();
-                result = b == received;
-                if (result)
+                // If the next byte was already received, use it
+                if (prev != 0)
                 {
+                    received = prev;
+                }
+                // If the next byte has not been received, get it
+                else
+                {
+                    received = (byte)serialPort.ReadByte();
+                }
+
+                // Determine whether the byte received was the byte expected
+                thisResult = b == received;
+
+                // If the byte received could have been an LF replaced with CRLF, check
+                if (received == 0x0D && b == 0x0A)
+                {
+                    prev = received;
+                    received = (byte)serialPort.ReadByte();
+
+                    thisResult = b == received;
+                }
+
+                // Log the result
+                if (thisResult)
+                {
+                    prev = 0;
                     Console.WriteLine("Recieved: " + b.ToString("X"));
                 }
                 else
                 {
-                    Console.WriteLine("Expected: " + b.ToString("X") +
-                        " Recieved: " + received.ToString("X"));
+                    result = false;
+                    Console.WriteLine("Recieved: " + received.ToString("X") + 
+                        " Expected: " + b.ToString("X"));
                 }
             }
             catch (TimeoutException)
@@ -94,7 +118,6 @@ class DeskDisplay
                 break;
             }
         }
-        Console.WriteLine();
 
         return result;
     }
