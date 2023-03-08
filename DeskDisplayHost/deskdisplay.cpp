@@ -8,7 +8,7 @@
 #define STATUS_LED 25
 #define DATA_LENGTH ((LED_STRIP_LENGTH * 3) + 1)
 #define STRIP_UPDATE_DELAY 10
-#define SERIAL_PAGE_SIZE 8
+#define SERIAL_PAGE_SIZE 512 // If there are problems transmitting bytes, lower this.
 
 // Raspberry pi GPIO
 /*

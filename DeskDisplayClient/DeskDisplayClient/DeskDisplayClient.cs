@@ -27,10 +27,10 @@ class DeskDisplay
             byte[] ledValues = new byte[DATA_LENGTH];
 
             for (int i = 0; i < LED_STRIP_LENGTH; i++)
-            {
-                ledValues[(3 * i) + 0] = (byte)(i + 1);
-                ledValues[(3 * i) + 1] = (byte)(i + 1);
-                ledValues[(3 * i) + 2] = (byte)(i + 1);
+            {//9e34eb
+                ledValues[(3 * i) + 0] = 0x9E;// (byte)((0xFF * i) / LED_STRIP_LENGTH);
+                ledValues[(3 * i) + 1] = 0x34;// (byte)((0xFF * i) / LED_STRIP_LENGTH);
+                ledValues[(3 * i) + 2] = 0xEB;// (byte)((0xFF * i) / LED_STRIP_LENGTH);
             }
 
             // Write data
@@ -49,7 +49,7 @@ class DeskDisplay
     private static void WriteToSerialPort(SerialPort serialPort, byte[] ledValues)
     {
         int offset = 0;
-        int count = 8;
+        int count = 512; // If there are problems transmitting bytes, lower this.
 
         // Write data and confirm it was received
         while (offset + count < ledValues.Length)
