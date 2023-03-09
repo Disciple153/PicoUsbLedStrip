@@ -50,7 +50,7 @@ void setLeds(uint8_t data[], WS2812 ledStrip);
 void displayModeInit(uint8_t displayMode, uint8_t data[], WS2812 ledStrip, ModeObject* modeObject);
 void displayModeUpdate(uint8_t displayMode, uint8_t data[], WS2812 ledStrip, ModeObject* modeObject, uint8_t deltaTime);
 void displayModeReload(uint8_t displayMode, uint8_t data[], WS2812 ledStrip, ModeObject* modeObject);
-uint8_t displayModeGet();
+int16_t displayModeGet();
 void writeFlash(uint8_t data[]);
 void readFlash(uint8_t data[]);
 
@@ -66,6 +66,7 @@ int main() {
     uint8_t data[DATA_SIZE];
     uint i, j;
     uint8_t displayMode = Constants::DisplayMode::Solid;
+    int16_t newDisplayMode;
     uint16_t heartbeatTimer = 0;
     uint32_t prevTime_us = time_us_32();
     uint32_t currentTimeTime_us = prevTime_us;
@@ -115,13 +116,17 @@ int main() {
 
             // Handshake
             printf("%s\n", Constants::ROM_ID);
-            sleep_ms(10);
 
             // Get displayMode
-            displayMode = displayModeGet();
+            newDisplayMode = displayModeGet();
 
-            // Initialize displayMode
-            displayModeInit(displayMode, data, ledStrip, &modeObject);
+            // If the new displayMode was successfully retrieved:
+            if (newDisplayMode != PICO_ERROR_TIMEOUT) {
+
+                // Initialize displayMode
+                displayMode = (uint8_t) newDisplayMode;
+                displayModeInit(displayMode, data, ledStrip, &modeObject);
+            }
         }
 
         // Update the ledStrip
@@ -173,7 +178,7 @@ void receiveData(uint8_t data[], int pageSize, int dataSize)
                 j < pageSize &&
                 i < dataSize)
         {
-            b = getchar_timeout_us(100000);
+            b = getchar_timeout_us(1000 * Constants::PC_TO_PICO_TIMEOUT_MS); // TODO decrease if possible
             data[i] = (uint8_t) b;
 
             i++;
@@ -186,16 +191,14 @@ void receiveData(uint8_t data[], int pageSize, int dataSize)
         }
 
         stdio_flush();
-        sleep_ms(Constants::PC_TO_PICO_TIMEOUT_MS);
     }
 }
 
-uint8_t displayModeGet()
+int16_t displayModeGet()
 {
-    uint8_t displayMode = getchar_timeout_us(50000);
+    int16_t displayMode = getchar_timeout_us(50 * Constants::PC_TO_PICO_TIMEOUT_MS); // TODO decrease if possible
     putchar(displayMode);
     stdio_flush();
-    sleep_ms(Constants::PC_TO_PICO_TIMEOUT_MS);
 
     return displayMode;
 }
@@ -209,7 +212,6 @@ void displayModeInit(uint8_t displayMode, uint8_t data[], WS2812 ledStrip, ModeO
         receiveData(data, Constants::SERIAL_PAGE_SIZE, Constants::DATA_LENGTH);
         setLeds(data, ledStrip);
         ledStrip.show();
-        sleep_ms(STRIP_UPDATE_DELAY);
         break;
 
     case (uint8_t) Constants::DisplayMode::Pulse:
@@ -218,14 +220,18 @@ void displayModeInit(uint8_t displayMode, uint8_t data[], WS2812 ledStrip, ModeO
         ledStrip.fill(WS2812::RGB(0x00, 0x00, 0xFF));
         ledStrip.show();
         
-        sleep_ms(STRIP_UPDATE_DELAY);
         (*modeObject).timer = 0;
         break;
     
     default:
-        ledStrip.fill(WS2812::RGB(0x00, 0xFF, 0x00));
+        ledStrip.fill(WS2812::RGB(0x00, 0x00, 0x00));
+        for (int i = 0; i < 8; i++)
+        {
+            if (1 << i & displayMode) {
+                ledStrip.setPixelColor(i, WS2812::RGB(0xFF, 0x00, 0x00));
+            }
+        }
         ledStrip.show();
-        sleep_ms(STRIP_UPDATE_DELAY);
         break;
     }
 
@@ -242,6 +248,8 @@ void displayModeUpdate(uint8_t displayMode, uint8_t data[], WS2812 ledStrip, Mod
     // Display based on displaymode
     switch (displayMode)
     {
+    case (uint8_t) Constants::DisplayMode::Solid:
+        break;
     case (uint8_t) Constants::DisplayMode::Pulse: // TODO
         (*modeObject).timer += deltaTime;
         (*modeObject).timer %= loopTime;
@@ -256,6 +264,14 @@ void displayModeUpdate(uint8_t displayMode, uint8_t data[], WS2812 ledStrip, Mod
         break;
 
     default:
+        ledStrip.fill(WS2812::RGB(0x00, 0x00, 0x00));
+        for (int i = 0; i < 8; i++)
+        {
+            if (1 << i & displayMode) {
+                ledStrip.setPixelColor(i+2, WS2812::RGB(0x00, 0xFF, 0x00));
+            }
+        }
+        ledStrip.show();
         break;
     }
 }
@@ -267,16 +283,20 @@ void displayModeReload(uint8_t displayMode, uint8_t data[], WS2812 ledStrip, Mod
     case (uint8_t) Constants::DisplayMode::Solid:
         setLeds(data, ledStrip);
         ledStrip.show();
-        sleep_ms(STRIP_UPDATE_DELAY);
         break;
 
     case (uint8_t) Constants::DisplayMode::Pulse: // TODO
         break;
 
-    default: // FIXME Always lands here
-        setLeds(data, ledStrip);
+    default:
+        ledStrip.fill(WS2812::RGB(0x00, 0x00, 0x00));
+        for (int i = 0; i < 8; i++)
+        {
+            if (1 << i & displayMode) {
+                ledStrip.setPixelColor(i, WS2812::RGB(0x00, 0x00, 0xFF));
+            }
+        }
         ledStrip.show();
-        sleep_ms(STRIP_UPDATE_DELAY);
         break;
     }
 }

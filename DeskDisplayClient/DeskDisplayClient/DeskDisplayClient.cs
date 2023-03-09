@@ -28,7 +28,7 @@ class DeskDisplay
             }
 
             // Send displayMode
-            WriteToSerialPort(serialPort, new byte[] { (byte)Constants.DisplayMode.Pulse });
+            WriteToSerialPort(serialPort, new byte[] { (byte)Constants.DisplayMode.Solid });
 
             // Prepare data to be written
             ledValues = new byte[Constants.DATA_LENGTH];
@@ -174,7 +174,7 @@ class DeskDisplay
             Console.WriteLine(portName);
 
             serialPort = new SerialPort(portName);
-            serialPort.ReadTimeout = 100;
+            serialPort.ReadTimeout = Constants.PC_TO_PICO_TIMEOUT_MS;
             serialPort.WriteTimeout = 1000;
             serialPort.BaudRate = 115200;
             serialPort.RtsEnable = true;
