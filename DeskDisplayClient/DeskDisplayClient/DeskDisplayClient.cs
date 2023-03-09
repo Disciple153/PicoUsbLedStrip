@@ -40,8 +40,9 @@ class DeskDisplay
                 ledValues[(3 * i) + 2] = 0xFF;// (byte)((0xFF * i) / LED_STRIP_LENGTH);
             }
 
+
             // Write data
-            //WriteToSerialPort(serialPort, ledValues);
+            WriteToSerialPort(serialPort, ledValues);
         }
         finally
         {
@@ -110,7 +111,7 @@ class DeskDisplay
                 if (thisResult)
                 {
                     prev = 0;
-                    Console.WriteLine("Recieved: " + b.ToString("X"));
+                    //Console.WriteLine("Recieved: " + b.ToString("X"));
                 }
                 else
                 {
