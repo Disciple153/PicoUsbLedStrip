@@ -1,5 +1,5 @@
 
-
+Test this:
 - Transmit like this (all asynchrynous. no timeouts.):
     1. wait for connection
     2. wait for request (0x00)
@@ -10,6 +10,7 @@
     7. recieve error code (0x00 or 0x01)
     8. if 0x01, goto 4
     9. if no response within timeout, goto 1
+        - free transmission.data if necesarry
     10. goto 1
 
 

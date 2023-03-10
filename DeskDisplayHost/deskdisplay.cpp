@@ -28,6 +28,7 @@
 #define FLASH_OFFSET 0x00100000u
 #define FLASH_MEM_START (XIP_BASE + FLASH_OFFSET)
 #define PI 3.14159265
+#define TRANSMISSION_TIMEOUT_MS 1000
 
 // Raspberry pi GPIO
 /*
@@ -38,6 +39,25 @@ ground  black   GND
 data    yellow  GP0
 
 */
+
+enum TransmissionState {
+    AwaitRequest,
+    RespondRomId,
+    ReceiveTransmissionLength1,
+    ReceiveTransmissionLength2,
+    ReceiveTransmission,
+    RespondHash,
+    ReceiveResult
+};
+
+struct Transmission {
+    uint8_t* data = NULL;
+    size_t length = 0;
+    size_t dataIndex = 0;
+    uint32_t last_tansmission_time_us = 0;
+    bool ready = false;
+    bool read = false;
+};
 
 struct ModeObject {
     uint16_t timer;
@@ -323,4 +343,122 @@ void readFlash(uint8_t data[])
     {
         data[i] = flashData[i];
     }
+}
+
+TransmissionState transmissionStateMachine(TransmissionState state, Transmission* transmission)
+{
+    int16_t temp16;
+    uint8_t temp8;
+
+    if (stdio_usb_connected() &&
+        time_us_32() - transmission->last_tansmission_time_us < TRANSMISSION_TIMEOUT_MS * 1000)
+    {
+        switch (state)
+        {
+        case TransmissionState::AwaitRequest:
+            if ((uint8_t) getchar_timeout_us(0) == 0x00)
+                transmission->ready = false;
+                transmission->last_tansmission_time_us = time_us_32();
+                state = transmissionStateMachine(TransmissionState::RespondRomId, transmission);
+            break;
+
+        case TransmissionState::RespondRomId:
+            printf("%s\n", Constants::ROM_ID);
+            state = transmissionStateMachine(TransmissionState::ReceiveTransmissionLength1, transmission);
+            break;
+
+        case TransmissionState::ReceiveTransmissionLength1:
+            temp16 = getchar_timeout_us(0);
+
+            if (temp16 != PICO_ERROR_TIMEOUT)
+            {
+                transmission->length = temp16;
+                transmission->last_tansmission_time_us = time_us_32();
+                state = transmissionStateMachine(TransmissionState::ReceiveTransmissionLength2, transmission);
+            }
+
+            break;
+
+        case TransmissionState::ReceiveTransmissionLength2:
+            temp16 = getchar_timeout_us(0);
+
+            if (temp16 != PICO_ERROR_TIMEOUT)
+            {
+                transmission->length |= ((uint16_t) temp16 << 8);
+
+                free(transmission->data);
+                transmission->data = (uint8_t*) malloc(transmission->length);
+
+                transmission->dataIndex = 0;
+
+                transmission->last_tansmission_time_us = time_us_32();
+                state = transmissionStateMachine(TransmissionState::ReceiveTransmission, transmission);
+            }
+
+            break;
+
+        case TransmissionState::ReceiveTransmission:
+            temp16 = getchar_timeout_us(0);
+
+            if (temp16 != PICO_ERROR_TIMEOUT)
+            {
+                transmission->data[transmission->dataIndex++] = temp16;
+                transmission->last_tansmission_time_us = time_us_32();
+
+                if (transmission->dataIndex < transmission->length)
+                {
+                    state = transmissionStateMachine(state, transmission);
+                }
+                else
+                {
+                    state = transmissionStateMachine(TransmissionState::RespondHash, transmission);
+                }
+            }
+
+            break;
+
+        case TransmissionState::RespondHash:
+
+            temp8 = 0;
+            for (int i = 0; i < transmission->length; i++)
+            {
+                temp8 += transmission->data[i];
+            }
+
+            putchar(temp8);
+            stdio_flush();
+
+            state = transmissionStateMachine(TransmissionState::ReceiveResult, transmission);
+
+            break;
+
+        case TransmissionState::ReceiveResult:
+            temp8 = getchar_timeout_us(0);
+
+            if (temp8 == 0x00)
+            {
+                transmission->read = false;
+                transmission->ready = true;
+
+                state = TransmissionState::AwaitRequest;
+            }
+            else if (temp8 == 0x01)
+            {
+                transmission->last_tansmission_time_us = time_us_32();
+                state = transmissionStateMachine(TransmissionState::ReceiveTransmissionLength1, transmission);
+            }
+
+            break;
+
+        
+        default:
+            break;
+        }
+    }
+    else
+    {
+        state = TransmissionState::AwaitRequest;
+    }
+
+    return state;
 }
