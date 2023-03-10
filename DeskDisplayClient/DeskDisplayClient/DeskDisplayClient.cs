@@ -58,6 +58,7 @@ class DeskDisplay
     {
         int offset = 0;
         int count = Constants.SERIAL_PAGE_SIZE; // If there are problems transmitting bytes, lower this.
+        DateTime dateTime ;
 
         // Write data and confirm it was received
         while (offset + count < ledValues.Length)
@@ -69,7 +70,9 @@ class DeskDisplay
 
         // Write the final chunk of data and confirm it was received
         serialPort.Write(ledValues, offset, ledValues.Length - offset);
+        dateTime = DateTime.Now;
         Confirm(serialPort, new List<byte>(ledValues).GetRange(offset, ledValues.Length - offset)); // TODO throw exception on false
+        Console.WriteLine("Confirmation time: " + (DateTime.Now - dateTime).ToString());
     }
 
     static bool Confirm(SerialPort serialPort, List<byte> data)
@@ -111,12 +114,12 @@ class DeskDisplay
                 if (thisResult)
                 {
                     prev = 0;
-                    //Console.WriteLine("Recieved: " + b.ToString("X"));
+                    //Console.WriteLine("Received: " + b.ToString("X"));
                 }
                 else
                 {
                     result = false;
-                    Console.WriteLine("Recieved: " + received.ToString("X") + 
+                    Console.WriteLine("Received: " + received.ToString("X") + 
                         " Expected: " + b.ToString("X"));
                 }
             }

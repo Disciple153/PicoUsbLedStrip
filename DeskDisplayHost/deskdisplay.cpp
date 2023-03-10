@@ -196,7 +196,7 @@ void receiveData(uint8_t data[], int pageSize, int dataSize)
 
 int16_t displayModeGet()
 {
-    int16_t displayMode = getchar_timeout_us(50 * Constants::PC_TO_PICO_TIMEOUT_MS); // TODO decrease if possible
+    int16_t displayMode = getchar_timeout_us(1000 * Constants::PC_TO_PICO_TIMEOUT_MS); // TODO decrease if possible
     putchar(displayMode);
     stdio_flush();
 
