@@ -2,6 +2,7 @@
 #include "pico/stdlib.h"
 #include "hardware/gpio.h"
 #include "dependencies/WS2812.hpp"
+#include "writablearray.hpp"
 #include <hardware/flash.h>
 #include <hardware/sync.h>
 #include <cstdlib>
@@ -40,20 +41,21 @@ data    yellow  GP0
 
 */
 
-enum TransmissionState {
+enum TransmissionState : uint8_t {
     AwaitRequest,
     RespondRomId,
-    ReceiveTransmissionLength1,
-    ReceiveTransmissionLength2,
+    ReceiveTransmissionLengthLow,
+    ReceiveTransmissionLengthHigh,
     ReceiveTransmission,
     RespondHash,
     ReceiveResult
 };
 
 struct Transmission {
-    uint8_t* data = NULL;
+    WritableArray* data = nullptr;
     size_t length = 0;
     size_t dataIndex = 0;
+    size_t pageIndex = 0;
     uint32_t last_tansmission_time_us = 0;
     bool ready = false;
     bool read = false;
@@ -73,12 +75,22 @@ void displayModeReload(uint8_t displayMode, uint8_t data[], WS2812 ledStrip, Mod
 int16_t displayModeGet();
 void writeFlash(uint8_t data[]);
 void readFlash(uint8_t data[]);
+TransmissionState transmissionStateMachine(TransmissionState state, Transmission* transmission);
+void debug(uint8_t value, uint8_t stripOffset = 0);
 
 
+// TODO delete
+WS2812* globalLedStrip;
+TransmissionState globalMaxState = TransmissionState::AwaitRequest;
 
 int main() {
+    uint8_t debugIndex = 0;
 
     ModeObject modeObject;
+
+    TransmissionState transmissionState = TransmissionState::AwaitRequest;
+    TransmissionState maxTransmissionState = TransmissionState::AwaitRequest;
+    Transmission transmission;
 
     bool statusLed = true;
     int16_t b;
@@ -110,6 +122,8 @@ int main() {
         WS2812::FORMAT_GRB
     );
 
+    globalLedStrip = &ledStrip;
+
     // Read data from flash
     readFlash(data);
     displayMode = data[Constants::DATA_LENGTH + 1];
@@ -129,25 +143,49 @@ int main() {
         deltaTime_ms = (currentTimeTime_us - prevTime_us) / 1000;
 
         // If there is a usb connection, attempt to get an new displayMode.
-        if (stdio_usb_connected())
+        // if (stdio_usb_connected())
+        // {
+        //     // Clear buffer
+        //     while (getchar_timeout_us(0) != PICO_ERROR_TIMEOUT);
+
+        //     // Handshake
+        //     printf("%s\n", Constants::ROM_ID);
+
+        //     // Get displayMode
+        //     newDisplayMode = displayModeGet();
+
+        //     // If the new displayMode was successfully retrieved:
+        //     if (newDisplayMode != PICO_ERROR_TIMEOUT) {
+
+        //         // Initialize displayMode
+        //         displayMode = (uint8_t) newDisplayMode;
+        //         displayModeInit(displayMode, data, ledStrip, &modeObject);
+        //     }
+        // }
+
+        // b = getchar_timeout_us(0);
+
+        // if (b != PICO_ERROR_TIMEOUT) {
+        //     putchar_raw(b);
+        // }
+
+        transmissionState = transmissionStateMachine(transmissionState, &transmission);
+
+        if (transmissionState > maxTransmissionState)
         {
-            // Clear buffer
-            while (getchar_timeout_us(0) != PICO_ERROR_TIMEOUT);
-
-            // Handshake
-            printf("%s\n", Constants::ROM_ID);
-
-            // Get displayMode
-            newDisplayMode = displayModeGet();
-
-            // If the new displayMode was successfully retrieved:
-            if (newDisplayMode != PICO_ERROR_TIMEOUT) {
-
-                // Initialize displayMode
-                displayMode = (uint8_t) newDisplayMode;
-                displayModeInit(displayMode, data, ledStrip, &modeObject);
-            }
+            maxTransmissionState = transmissionState;
         }
+
+        // if (0x08 * debugIndex < Constants::LED_STRIP_LENGTH)
+        // {
+        //     int16_t r = getchar_timeout_us(0);
+        //     if (r != PICO_ERROR_TIMEOUT)
+        //     {
+        //         debug(r, debugIndex);
+        //     }
+
+        //     debugIndex++;
+        // }
 
         // Update the ledStrip
         displayModeUpdate(displayMode, data, ledStrip, &modeObject, deltaTime_ms);
@@ -207,7 +245,7 @@ void receiveData(uint8_t data[], int pageSize, int dataSize)
 
         // Echo line just read
         for (int k = i - j; k < i; k++) {
-            putchar(data[k]);
+            putchar_raw(data[k]);
         }
 
         stdio_flush();
@@ -217,7 +255,7 @@ void receiveData(uint8_t data[], int pageSize, int dataSize)
 int16_t displayModeGet()
 {
     int16_t displayMode = getchar_timeout_us(1000 * Constants::PC_TO_PICO_TIMEOUT_MS); // TODO decrease if possible
-    putchar(displayMode);
+    putchar_raw(displayMode);
     stdio_flush();
 
     return displayMode;
@@ -349,116 +387,191 @@ TransmissionState transmissionStateMachine(TransmissionState state, Transmission
 {
     int16_t temp16;
     uint8_t temp8;
+    bool doNextStep = true;
 
     if (stdio_usb_connected() &&
         time_us_32() - transmission->last_tansmission_time_us < TRANSMISSION_TIMEOUT_MS * 1000)
     {
-        switch (state)
+        while (doNextStep)
         {
-        case TransmissionState::AwaitRequest:
-            if ((uint8_t) getchar_timeout_us(0) == 0x00)
-                transmission->ready = false;
-                transmission->last_tansmission_time_us = time_us_32();
-                state = transmissionStateMachine(TransmissionState::RespondRomId, transmission);
-            break;
+            doNextStep = false;
 
-        case TransmissionState::RespondRomId:
-            printf("%s\n", Constants::ROM_ID);
-            state = transmissionStateMachine(TransmissionState::ReceiveTransmissionLength1, transmission);
-            break;
-
-        case TransmissionState::ReceiveTransmissionLength1:
-            temp16 = getchar_timeout_us(0);
-
-            if (temp16 != PICO_ERROR_TIMEOUT)
+            switch (state)
             {
-                transmission->length = temp16;
-                transmission->last_tansmission_time_us = time_us_32();
-                state = transmissionStateMachine(TransmissionState::ReceiveTransmissionLength2, transmission);
-            }
+            case TransmissionState::AwaitRequest:
+                if ((uint8_t) getchar_timeout_us(0) == 0x00)
+                    transmission->ready = false;
+                    transmission->last_tansmission_time_us = time_us_32();
 
-            break;
+                    state = TransmissionState::RespondRomId;
+                    doNextStep = true;
+                break;
 
-        case TransmissionState::ReceiveTransmissionLength2:
-            temp16 = getchar_timeout_us(0);
+            case TransmissionState::RespondRomId:
+                printf("%s\n", Constants::ROM_ID);
+                state = TransmissionState::ReceiveTransmissionLengthLow;
+                doNextStep = true;
+                break;
 
-            if (temp16 != PICO_ERROR_TIMEOUT)
-            {
-                transmission->length |= ((uint16_t) temp16 << 8);
+            case TransmissionState::ReceiveTransmissionLengthLow:
+                temp16 = getchar_timeout_us(0);
 
-                free(transmission->data);
-                transmission->data = (uint8_t*) malloc(transmission->length);
-
-                transmission->dataIndex = 0;
-
-                transmission->last_tansmission_time_us = time_us_32();
-                state = transmissionStateMachine(TransmissionState::ReceiveTransmission, transmission);
-            }
-
-            break;
-
-        case TransmissionState::ReceiveTransmission:
-            temp16 = getchar_timeout_us(0);
-
-            if (temp16 != PICO_ERROR_TIMEOUT)
-            {
-                transmission->data[transmission->dataIndex++] = temp16;
-                transmission->last_tansmission_time_us = time_us_32();
-
-                if (transmission->dataIndex < transmission->length)
+                if (temp16 != PICO_ERROR_TIMEOUT)
                 {
-                    state = transmissionStateMachine(state, transmission);
+                    transmission->length = (uint8_t) temp16;
+                    transmission->last_tansmission_time_us = time_us_32();
+
+                    debug(temp16, 1);
+                    state = TransmissionState::ReceiveTransmissionLengthHigh;
+                    doNextStep = true;
                 }
-                else
+
+                break;
+
+            case TransmissionState::ReceiveTransmissionLengthHigh:
+                temp16 = getchar_timeout_us(0);
+
+                if (temp16 != PICO_ERROR_TIMEOUT)
                 {
-                    state = transmissionStateMachine(TransmissionState::RespondHash, transmission);
+                    transmission->length |= temp16 << 8;
+
+                    // FIXME. Data cannot be written to data when this is called twice
+                    delete transmission->data;
+                    transmission->data = nullptr;
+                    transmission->data = new WritableArray(transmission->length);
+
+                    transmission->dataIndex = 0;
+                    transmission->last_tansmission_time_us = time_us_32();
+
+                    debug(temp16, 2);
+                    state = TransmissionState::ReceiveTransmission;
+                    doNextStep = true;
                 }
+
+
+                break;
+
+            case TransmissionState::ReceiveTransmission:
+                temp16 = getchar_timeout_us(0);
+
+                if (temp16 != PICO_ERROR_TIMEOUT)
+                {
+                    (*transmission->data)[transmission->dataIndex++] = (uint8_t) temp16;
+                    transmission->pageIndex++;
+                    transmission->last_tansmission_time_us = time_us_32();
+
+                    if (!(transmission->dataIndex < transmission->length &&
+                        transmission->pageIndex < Constants::SERIAL_PAGE_SIZE))
+                    {
+                        state = TransmissionState::RespondHash;
+                    }
+                    
+                    doNextStep = true;
+                }
+
+                debug(transmission->length, 3);
+                debug(transmission->length >> 8, 4);
+                debug(transmission->dataIndex, 5);
+                debug(transmission->dataIndex >> 8, 6);
+
+                break;
+
+            case TransmissionState::RespondHash:
+
+                if (getchar_timeout_us(0) == 0x00)
+                {
+                    temp8 = 0;
+                    temp16 = transmission->dataIndex - transmission->pageIndex;
+
+                    // Add values from start of last page to end of received data.
+                    for (int i = temp16; i < transmission->dataIndex; i++)
+                    {
+                        temp8 += (*transmission->data)[i];
+                    }
+
+                    putchar_raw(temp8);
+                    stdio_flush();
+
+                    state = TransmissionState::ReceiveResult;
+                    doNextStep = true;
+                }
+
+                debug(temp8, 7);
+
+                break;
+
+            case TransmissionState::ReceiveResult:
+                temp8 = getchar_timeout_us(0);
+
+                if (temp8 == 0x00)
+                {
+                    transmission->read = false;
+                    transmission->ready = true;
+
+                    if (transmission->dataIndex < transmission->length)
+                    {
+                        transmission->pageIndex = 0;
+                        state = TransmissionState::ReceiveTransmission;
+                        doNextStep = true;
+                    }
+                    else
+                    {
+                        state = TransmissionState::AwaitRequest;
+                    }
+                }
+                else if (temp8 == 0x01)
+                {
+                    // If error, restart from previous page
+                    transmission->dataIndex -= transmission->pageIndex;
+                    transmission->pageIndex = 0;
+                    transmission->last_tansmission_time_us = time_us_32();
+
+                    state = TransmissionState::ReceiveTransmissionLengthLow;
+                    doNextStep = true;
+                }
+
+                debug(temp8, 8);
+
+                break;
+
+            
+            default:
+                break;
             }
 
-            break;
-
-        case TransmissionState::RespondHash:
-
-            temp8 = 0;
-            for (int i = 0; i < transmission->length; i++)
-            {
-                temp8 += transmission->data[i];
-            }
-
-            putchar(temp8);
-            stdio_flush();
-
-            state = transmissionStateMachine(TransmissionState::ReceiveResult, transmission);
-
-            break;
-
-        case TransmissionState::ReceiveResult:
-            temp8 = getchar_timeout_us(0);
-
-            if (temp8 == 0x00)
-            {
-                transmission->read = false;
-                transmission->ready = true;
-
-                state = TransmissionState::AwaitRequest;
-            }
-            else if (temp8 == 0x01)
-            {
-                transmission->last_tansmission_time_us = time_us_32();
-                state = transmissionStateMachine(TransmissionState::ReceiveTransmissionLength1, transmission);
-            }
-
-            break;
-
-        
-        default:
-            break;
+            globalMaxState = state > globalMaxState ? state : globalMaxState;
+            debug(globalMaxState);
         }
     }
     else
     {
         state = TransmissionState::AwaitRequest;
+        transmission->last_tansmission_time_us = time_us_32();
     }
 
     return state;
+}
+
+void debug(uint8_t value, uint8_t stripOffset)
+{
+    //globalLedStrip->fill(WS2812::RGB(0x00, 0x00, 0x00));
+    uint8_t bits = 0x08;
+    uint32_t color = WS2812::RGB(
+        ((stripOffset + 0) % 3 ? 0x00 : 0xFF),
+        ((stripOffset + 1) % 3 ? 0x00 : 0xFF),
+        ((stripOffset + 2) % 3 ? 0x00 : 0xFF)
+    );
+
+    for (int i = 0; i < 8; i++)
+    {
+        if (1 << i & value) {
+            globalLedStrip->setPixelColor(i+2+(stripOffset*bits), color);
+        }
+        else
+        {
+            globalLedStrip->setPixelColor(i+2+(stripOffset*bits), (uint32_t) -1 ^ color);
+        }
+        
+    }
+    globalLedStrip->show();
 }

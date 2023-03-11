@@ -13,6 +13,8 @@ class DeskDisplay
     {
         SerialPort? serialPort = null;
         byte[] ledValues;
+        List<byte> leds = new List<byte>();
+        byte hash = 0;
 
         Console.WriteLine(Constants.DisplayMode.Solid);
 
@@ -27,22 +29,80 @@ class DeskDisplay
                 throw new Exception("DeskDisplay not found.");
             }
 
-            // Send displayMode
-            WriteToSerialPort(serialPort, new byte[] { (byte)Constants.DisplayMode.Solid });
+            //ushort length = 0x0401;
 
-            // Prepare data to be written
-            ledValues = new byte[Constants.DATA_LENGTH];
+            //// Should be 0x0102
+            //serialPort.Write(new byte[] { (byte) (length >> 8), (byte) length }, 0, 2);
+
+            //// Send 0x0102 empty bytes
+            //serialPort.Write(new byte[length], 0, length);
+
+            //// Recieve 0x00 back
+            //Console.WriteLine("Hash: " + serialPort.ReadByte().ToString("X2"));
+
+            //// Respond success
+            //serialPort.Write(new byte[] { 0x01 }, 0, 1);
+
+
+            leds.Add((byte)(Constants.LED_STRIP_LENGTH * 3));
+            leds.Add((byte) ((Constants.LED_STRIP_LENGTH * 3) >> 8));
 
             for (int i = 0; i < Constants.LED_STRIP_LENGTH; i++)
             {//9e34eb
-                ledValues[(3 * i) + 0] = 0x80;// (byte)((0xFF * i) / LED_STRIP_LENGTH);
-                ledValues[(3 * i) + 1] = 0x00;// (byte)((0xFF * i) / LED_STRIP_LENGTH);
-                ledValues[(3 * i) + 2] = 0xFF;// (byte)((0xFF * i) / LED_STRIP_LENGTH);
+                leds.Add(0x80);// (byte)((0xFF * i) / LED_STRIP_LENGTH);
+                leds.Add(0x00);// (byte)((0xFF * i) / LED_STRIP_LENGTH);
+                leds.Add(0xFF);// (byte)((0xFF * i) / LED_STRIP_LENGTH);
             }
 
+            for (int i = 2; i < leds.Count; i++)
+            {
+                hash += leds[i];
+            }
 
-            // Write data
-            WriteToSerialPort(serialPort, ledValues);
+            leds.Add(0x00);
+
+            Console.WriteLine(
+                "Low:  0x" + leds[0].ToString("X2") + "\n" +
+                "High: 0x" + leds[1].ToString("X2") + "\n" +
+                "Hash: 0x" + hash.ToString("X2") + "\n"
+            );
+
+            serialPort.Write(leds.ToArray(), 0, leds.Count);
+
+            //try
+            //{
+            //    while (true)
+            //    {
+            //        Console.Write(serialPort.ReadByte().ToString("X2") + " ");
+            //    }
+            //}
+            //catch (TimeoutException)
+            //{
+
+            //}
+
+            Console.WriteLine("Hash: 0x" + serialPort.ReadByte().ToString("X2"));
+
+            serialPort.Write(new byte[] { 0x00 }, 0, 1);
+
+
+
+            //// Send displayMode
+            //WriteToSerialPort(serialPort, new byte[] { (byte)Constants.DisplayMode.Solid });
+
+            //// Prepare data to be written
+            //ledValues = new byte[Constants.DATA_LENGTH];
+
+            //for (int i = 0; i < Constants.LED_STRIP_LENGTH; i++)
+            //{//9e34eb
+            //    ledValues[(3 * i) + 0] = 0x80;// (byte)((0xFF * i) / LED_STRIP_LENGTH);
+            //    ledValues[(3 * i) + 1] = 0x00;// (byte)((0xFF * i) / LED_STRIP_LENGTH);
+            //    ledValues[(3 * i) + 2] = 0xFF;// (byte)((0xFF * i) / LED_STRIP_LENGTH);
+            //}
+
+
+            //// Write data
+            //WriteToSerialPort(serialPort, ledValues);
         }
         finally
         {
@@ -114,13 +174,13 @@ class DeskDisplay
                 if (thisResult)
                 {
                     prev = 0;
-                    //Console.WriteLine("Received: " + b.ToString("X"));
+                    //Console.WriteLine("Received: " + b.ToString("X2"));
                 }
                 else
                 {
                     result = false;
-                    Console.WriteLine("Received: " + received.ToString("X") + 
-                        " Expected: " + b.ToString("X"));
+                    Console.WriteLine("Received: " + received.ToString("X2") + 
+                        " Expected: " + b.ToString("X2"));
                 }
             }
             catch (TimeoutException)
@@ -177,7 +237,7 @@ class DeskDisplay
             Console.WriteLine(portName);
 
             serialPort = new SerialPort(portName);
-            serialPort.ReadTimeout = Constants.PC_TO_PICO_TIMEOUT_MS;
+            serialPort.ReadTimeout = 5000;
             serialPort.WriteTimeout = 1000;
             serialPort.BaudRate = 115200;
             serialPort.RtsEnable = true;
@@ -194,6 +254,7 @@ class DeskDisplay
 
             try
             {
+                //serialPort.Write(new byte[] { 0x01 }, 0, 1);
                 deviceName = serialPort.ReadLine();
                 Console.WriteLine("Device Name: " + deviceName);
 

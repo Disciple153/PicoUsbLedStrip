@@ -6,7 +6,7 @@ project(deskdisplay)
 
 pico_sdk_init()
 
-add_executable(deskdisplay deskdisplay.cpp dependencies/WS2812.cpp)
+add_executable(deskdisplay deskdisplay.cpp dependencies/WS2812.cpp writablearray.cpp)
 
 # enable usb output, disable uart output
 pico_enable_stdio_usb(deskdisplay 1)
