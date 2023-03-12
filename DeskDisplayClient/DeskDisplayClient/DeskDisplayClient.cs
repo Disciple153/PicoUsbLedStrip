@@ -14,9 +14,6 @@ class DeskDisplay
     {
         SerialPort? serialPort = null;
         List<byte> leds;
-        byte response;
-
-        Console.WriteLine(Constants.DisplayMode.Solid);
 
         try
         {
@@ -29,12 +26,40 @@ class DeskDisplay
                 throw new Exception("DeskDisplay not found.");
             }
 
+            //leds = new List<byte>
+            //{
+            //    (byte)Constants.DisplayMode.Pulse
+            //};
+
+            //for (int j = 0; j < Constants.LED_STRIP_LENGTH; j++)
+            //{
+            //    leds.Add(0x80);// (byte)((0xFF * i) / LED_STRIP_LENGTH);
+            //    leds.Add(0x00);// (byte)((0xFF * i) / LED_STRIP_LENGTH);
+            //    leds.Add(0xFF);// (byte)((0xFF * i) / LED_STRIP_LENGTH);
+            //}
+
+            //string result = WriteToSerialPort(serialPort, leds);
+
+            //if (result == Constants.SUCCESS)
+            //{
+            //    Console.WriteLine("Success");
+            //}
+            //else
+            //{
+            //    Console.WriteLine("Failure");
+            //}
+
+
             Stopwatch stopWatch = new Stopwatch();
             stopWatch.Start();
 
             for (byte i = 0x00; i < 0xFF; i++)
             {
-                leds = new List<byte>();
+                leds = new List<byte>
+                {
+                    (byte)Constants.DisplayMode.Stream
+                };
+
                 for (int j = 0; j < Constants.LED_STRIP_LENGTH; j++)
                 {
                     leds.Add(i);// (byte)((0xFF * i) / LED_STRIP_LENGTH);
@@ -44,9 +69,7 @@ class DeskDisplay
 
                 WriteToSerialPort(serialPort, leds);
 
-                response = (byte) serialPort.ReadByte();
 
-                //Console.WriteLine("Response: 0x" + response.ToString("X2"));
             }
 
             stopWatch.Stop();
@@ -64,14 +87,15 @@ class DeskDisplay
         }
     }
 
-    private static void WriteToSerialPort(SerialPort serialPort, IEnumerable<byte> payload)
+    private static string WriteToSerialPort(SerialPort serialPort, IEnumerable<byte> payload)
     {
-        // Prepare
 
+        // Get confirmation
+        serialPort.DiscardInBuffer();
+        serialPort.Write(new byte[] { (byte)Constants.START_CODE }, 0, 1);
 
-        serialPort.Write(new byte[] { 0x00 }, 0, 1);
-        string deviceName = serialPort.ReadLine();
-        //Console.WriteLine(deviceName);
+        string deviceName = "DD" + serialPort.ReadTo("DD\r\n");
+        //Console.WriteLine("WRITE: device name: " + deviceName);
 
         // Payload
         LinkedList<byte> leds = new LinkedList<byte>(payload);
@@ -92,7 +116,14 @@ class DeskDisplay
 
         leds.AddLast(hash);
 
+        // Write
         serialPort.Write(leds.ToArray(), 0, leds.Count);
+
+        // Get response
+        string response = serialPort.ReadTo("!\r\n");
+        //Console.WriteLine("Response: " + response);
+
+        return response[response.Length - 1] + "!";
     }
 
     // FIXME Windows only
@@ -156,13 +187,15 @@ class DeskDisplay
 
             try
             {
-                //serialPort.Write(new byte[] { 0x01 }, 0, 1);
+
+                serialPort.DiscardInBuffer();
+                serialPort.Write(new byte[] { (byte)Constants.START_CODE }, 0, 1);
                 deviceName = serialPort.ReadLine().Trim('\r', '\n');
                 Console.WriteLine("Device Name: " + deviceName);
 
                 if (deviceName == Constants.ROM_ID)  
                 {
-                    Thread.Sleep(100);
+                    Thread.Sleep(Constants.TRANSMISSION_TIMEOUT_MS + 1);
                     break;
                 }
                 else

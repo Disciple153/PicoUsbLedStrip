@@ -6,9 +6,6 @@
 
 class WritableArray
 {
-    private:
-        WritableArray *self;
-        /* data */
     public:
         uint8_t *data;
         size_t rawLength;
@@ -18,7 +15,8 @@ class WritableArray
 
         uint8_t& operator[](size_t index);
         size_t length();
-        static WritableArray* load(uint8_t* start);
+        static WritableArray* read(const uint8_t* start);
+        void write(const uint8_t* start);
 
 };
 
