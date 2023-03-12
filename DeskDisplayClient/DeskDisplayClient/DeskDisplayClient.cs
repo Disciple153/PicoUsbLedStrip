@@ -1,5 +1,6 @@
 ﻿// See https://aka.ms/new-console-template for more information
 using Microsoft.Win32;
+using System.Diagnostics;
 using System.IO.Ports;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -12,9 +13,7 @@ class DeskDisplay
     static void Main(string[] args)
     {
         SerialPort? serialPort = null;
-        byte[] ledValues;
-
-        Console.WriteLine(Constants.DisplayMode.Solid);
+        List<byte> leds;
 
         try
         {
@@ -27,22 +26,56 @@ class DeskDisplay
                 throw new Exception("DeskDisplay not found.");
             }
 
-            // Send displayMode
-            WriteToSerialPort(serialPort, new byte[] { (byte)Constants.DisplayMode.Solid });
+            //leds = new List<byte>
+            //{
+            //    (byte)Constants.DisplayMode.Pulse
+            //};
 
-            // Prepare data to be written
-            ledValues = new byte[Constants.DATA_LENGTH];
+            //for (int j = 0; j < Constants.LED_STRIP_LENGTH; j++)
+            //{
+            //    leds.Add(0x80);// (byte)((0xFF * i) / LED_STRIP_LENGTH);
+            //    leds.Add(0x00);// (byte)((0xFF * i) / LED_STRIP_LENGTH);
+            //    leds.Add(0xFF);// (byte)((0xFF * i) / LED_STRIP_LENGTH);
+            //}
 
-            for (int i = 0; i < Constants.LED_STRIP_LENGTH; i++)
-            {//9e34eb
-                ledValues[(3 * i) + 0] = 0x80;// (byte)((0xFF * i) / LED_STRIP_LENGTH);
-                ledValues[(3 * i) + 1] = 0x00;// (byte)((0xFF * i) / LED_STRIP_LENGTH);
-                ledValues[(3 * i) + 2] = 0xFF;// (byte)((0xFF * i) / LED_STRIP_LENGTH);
+            //string result = WriteToSerialPort(serialPort, leds);
+
+            //if (result == Constants.SUCCESS)
+            //{
+            //    Console.WriteLine("Success");
+            //}
+            //else
+            //{
+            //    Console.WriteLine("Failure");
+            //}
+
+
+            Stopwatch stopWatch = new Stopwatch();
+            stopWatch.Start();
+
+            for (byte i = 0x00; i < 0xFF; i++)
+            {
+                leds = new List<byte>
+                {
+                    (byte)Constants.DisplayMode.Stream
+                };
+
+                for (int j = 0; j < Constants.LED_STRIP_LENGTH; j++)
+                {
+                    leds.Add(i);// (byte)((0xFF * i) / LED_STRIP_LENGTH);
+                    leds.Add(i);// (byte)((0xFF * i) / LED_STRIP_LENGTH);
+                    leds.Add(i);// (byte)((0xFF * i) / LED_STRIP_LENGTH);
+                }
+
+                WriteToSerialPort(serialPort, leds);
+
+
             }
 
+            stopWatch.Stop();
 
-            // Write data
-            WriteToSerialPort(serialPort, ledValues);
+            Console.WriteLine(1f / (stopWatch.Elapsed.TotalSeconds / 0xFF) + " FPS");
+
         }
         finally
         {
@@ -54,83 +87,43 @@ class DeskDisplay
         }
     }
 
-    private static void WriteToSerialPort(SerialPort serialPort, byte[] ledValues)
+    private static string WriteToSerialPort(SerialPort serialPort, IEnumerable<byte> payload)
     {
-        int offset = 0;
-        int count = Constants.SERIAL_PAGE_SIZE; // If there are problems transmitting bytes, lower this.
-        DateTime dateTime ;
 
-        // Write data and confirm it was received
-        while (offset + count < ledValues.Length)
+        // Get confirmation
+        serialPort.DiscardInBuffer();
+        serialPort.Write(new byte[] { (byte)Constants.START_CODE }, 0, 1);
+
+        string deviceName = "DD" + serialPort.ReadTo("DD\r\n");
+        //Console.WriteLine("WRITE: device name: " + deviceName);
+
+        // Payload
+        LinkedList<byte> leds = new LinkedList<byte>(payload);
+
+        // Length
+        short length = (short) payload.Count();
+
+        leds.AddFirst((byte) (length >> 8));
+        leds.AddFirst((byte) length);
+
+        // Hash
+        byte hash = 0;
+
+        foreach (byte b in leds)
         {
-            serialPort.Write(ledValues, offset, count);
-            Confirm(serialPort, new List<byte>(ledValues).GetRange(offset, count)); // TODO throw exception on false
-            offset += count;
+            hash += b;
         }
 
-        // Write the final chunk of data and confirm it was received
-        serialPort.Write(ledValues, offset, ledValues.Length - offset);
-        dateTime = DateTime.Now;
-        Confirm(serialPort, new List<byte>(ledValues).GetRange(offset, ledValues.Length - offset)); // TODO throw exception on false
-        Console.WriteLine("Confirmation time: " + (DateTime.Now - dateTime).ToString());
-    }
+        leds.AddLast(hash);
 
-    static bool Confirm(SerialPort serialPort, List<byte> data)
-    {
-        bool thisResult;
-        bool result = true;
-        byte received;
-        byte prev = 0;
+        // Write
+        serialPort.Write(leds.ToArray(), 0, leds.Count);
 
-        // Get and confirm data until the read operation times out
-        foreach (byte b in data)
-        {
-            try
-            {
-                // If the next byte was already received, use it
-                if (prev != 0)
-                {
-                    received = prev;
-                }
-                // If the next byte has not been received, get it
-                else
-                {
-                    received = (byte)serialPort.ReadByte();
-                }
+        // Get response
+        string response = serialPort.ReadTo("!\r\n");
+        //Console.WriteLine("Response: " + response);
 
-                // Determine whether the byte received was the byte expected
-                thisResult = b == received;
-
-                // If the byte received could have been an LF replaced with CRLF, check
-                if (received == 0x0D && b == 0x0A)
-                {
-                    prev = received;
-                    received = (byte)serialPort.ReadByte();
-
-                    thisResult = b == received;
-                }
-
-                // Log the result
-                if (thisResult)
-                {
-                    prev = 0;
-                    //Console.WriteLine("Received: " + b.ToString("X"));
-                }
-                else
-                {
-                    result = false;
-                    Console.WriteLine("Received: " + received.ToString("X") + 
-                        " Expected: " + b.ToString("X"));
-                }
-            }
-            catch (TimeoutException)
-            {
-                Console.WriteLine("No input");
-                break;
-            }
-        }
-
-        return result;
+        return response[response.Length - 1] + "!";
     }
 
     // FIXME Windows only
@@ -177,7 +170,7 @@ class DeskDisplay
             Console.WriteLine(portName);
 
             serialPort = new SerialPort(portName);
-            serialPort.ReadTimeout = Constants.PC_TO_PICO_TIMEOUT_MS;
+            serialPort.ReadTimeout = 5000;
             serialPort.WriteTimeout = 1000;
             serialPort.BaudRate = 115200;
             serialPort.RtsEnable = true;
@@ -194,12 +187,20 @@ class DeskDisplay
 
             try
             {
-                deviceName = serialPort.ReadLine();
+
+                serialPort.DiscardInBuffer();
+                serialPort.Write(new byte[] { (byte)Constants.START_CODE }, 0, 1);
+                deviceName = serialPort.ReadLine().Trim('\r', '\n');
                 Console.WriteLine("Device Name: " + deviceName);
 
                 if (deviceName == Constants.ROM_ID)  
                 {
+                    Thread.Sleep(Constants.TRANSMISSION_TIMEOUT_MS + 1);
                     break;
+                }
+                else
+                {
+                    serialPort = null;
                 }
             }
             catch (TimeoutException)
@@ -211,25 +212,4 @@ class DeskDisplay
 
         return serialPort;
     }
-
-    static List<byte> Receive(SerialPort serialPort)
-    {
-        List<byte> data = new List<byte>();
-        bool timeout = false;
-
-        while (!timeout)
-        {
-            try
-            {
-                data.Add((byte)serialPort.ReadByte());
-            }
-            catch (TimeoutException)
-            {
-                timeout = true;
-            }
-        }
-
-        return data;
-    }
-
 }

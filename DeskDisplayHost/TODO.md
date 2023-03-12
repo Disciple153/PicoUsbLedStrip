@@ -15,3 +15,16 @@ Test this:
 
 
 - Confirm transmission using a hash instead of a repeat
+
+- Pagify transmissions DONE
+- Remove recursion DONE
+- Spread out hashing operations
+- Maybe statically allocate data
+- Make the transmission data pointer an array object
+    - Overload [] to access normally DONE
+    - Length: length - 2 DONE
+    - RawLength: length of raw data DONE
+    - RawData: array (either dynamic or static) length divisible by 256 DONE
+    - static method to load array
+
+try to redefine USBD_PID in pico-sdk/src/rp2_common/pico_stdio_usb/stdio_usb_descriptors.c
