@@ -54,12 +54,12 @@ class DeskDisplay
                 leds.Add(0xFF);// (byte)((0xFF * i) / LED_STRIP_LENGTH);
             }
 
-            for (int i = 2; i < leds.Count; i++)
+            for (int i = 0; i < leds.Count; i++)
             {
                 hash += leds[i];
             }
 
-            leds.Add(0x00);
+            leds.Add(hash);
 
             Console.WriteLine(
                 "Low:  0x" + leds[0].ToString("X2") + "\n" +

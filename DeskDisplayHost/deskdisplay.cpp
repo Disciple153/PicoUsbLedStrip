@@ -47,8 +47,7 @@ enum TransmissionState : uint8_t {
     ReceiveTransmissionLengthLow,
     ReceiveTransmissionLengthHigh,
     ReceiveTransmission,
-    RespondHash,
-    ReceiveResult
+    RecieveHash
 };
 
 struct Transmission {
@@ -176,6 +175,22 @@ int main() {
             maxTransmissionState = transmissionState;
         }
 
+        if (transmission.ready && !transmission.read)
+        {
+
+            for (int i = 0; i < Constants::LED_STRIP_LENGTH; i++)
+            {
+                ledStrip.setPixelColor(i, WS2812::RGB(
+                    (*transmission.data)[(i*3) + 0],
+                    (*transmission.data)[(i*3) + 1],
+                    (*transmission.data)[(i*3) + 2]
+                ));
+                
+            }
+            ledStrip.show();
+            transmission.read = true;
+        }
+
         // if (0x08 * debugIndex < Constants::LED_STRIP_LENGTH)
         // {
         //     int16_t r = getchar_timeout_us(0);
@@ -188,7 +203,7 @@ int main() {
         // }
 
         // Update the ledStrip
-        displayModeUpdate(displayMode, data, ledStrip, &modeObject, deltaTime_ms);
+        //displayModeUpdate(displayMode, data, ledStrip, &modeObject, deltaTime_ms);
 
         // Sleep
         sleep_ms(REFRESH_INTERVAL_MS > deltaTime_ms ? REFRESH_INTERVAL_MS - deltaTime_ms : 0);
@@ -421,7 +436,6 @@ TransmissionState transmissionStateMachine(TransmissionState state, Transmission
                     transmission->length = (uint8_t) temp16;
                     transmission->last_tansmission_time_us = time_us_32();
 
-                    debug(temp16, 1);
                     state = TransmissionState::ReceiveTransmissionLengthHigh;
                     doNextStep = true;
                 }
@@ -441,9 +455,9 @@ TransmissionState transmissionStateMachine(TransmissionState state, Transmission
                     transmission->data = new WritableArray(transmission->length);
 
                     transmission->dataIndex = 0;
+                    transmission->pageIndex = 0;
                     transmission->last_tansmission_time_us = time_us_32();
 
-                    debug(temp16, 2);
                     state = TransmissionState::ReceiveTransmission;
                     doNextStep = true;
                 }
@@ -463,84 +477,73 @@ TransmissionState transmissionStateMachine(TransmissionState state, Transmission
                     if (!(transmission->dataIndex < transmission->length &&
                         transmission->pageIndex < Constants::SERIAL_PAGE_SIZE))
                     {
-                        state = TransmissionState::RespondHash;
+                        state = TransmissionState::RecieveHash;
                     }
                     
                     doNextStep = true;
                 }
 
-                debug(transmission->length, 3);
-                debug(transmission->length >> 8, 4);
-                debug(transmission->dataIndex, 5);
-                debug(transmission->dataIndex >> 8, 6);
-
                 break;
 
-            case TransmissionState::RespondHash:
+            case TransmissionState::RecieveHash:
+                temp16 = getchar_timeout_us(0);
 
-                if (getchar_timeout_us(0) == 0x00)
+                if (temp16 != PICO_ERROR_TIMEOUT)
                 {
-                    temp8 = 0;
-                    temp16 = transmission->dataIndex - transmission->pageIndex;
+                    transmission->last_tansmission_time_us = time_us_32();
+
+                    // Add the length to the hash
+                    temp8 = (*transmission->data).length();
+                    temp8 += (*transmission->data).length() >> 8;
+
+                    temp8 = (*transmission->data)[-1];
+                    temp8 += (*transmission->data)[-2];
 
                     // Add values from start of last page to end of received data.
-                    for (int i = temp16; i < transmission->dataIndex; i++)
+                    for (int i = transmission->dataIndex - transmission->pageIndex; i < transmission->dataIndex; i++)
                     {
                         temp8 += (*transmission->data)[i];
                     }
 
-                    putchar_raw(temp8);
-                    stdio_flush();
-
-                    state = TransmissionState::ReceiveResult;
-                    doNextStep = true;
-                }
-
-                debug(temp8, 7);
-
-                break;
-
-            case TransmissionState::ReceiveResult:
-                temp8 = getchar_timeout_us(0);
-
-                if (temp8 == 0x00)
-                {
-                    transmission->read = false;
-                    transmission->ready = true;
-
-                    if (transmission->dataIndex < transmission->length)
+                    if (((uint8_t) temp16) == temp8)
                     {
+                        putchar_raw(0x00);
+
+                        if (transmission->dataIndex < transmission->length)
+                        {
+                            transmission->pageIndex = 0;
+                            state = TransmissionState::ReceiveTransmissionLengthLow;
+                            doNextStep = true;
+                        }
+                        else
+                        {
+                            transmission->read = false;
+                            transmission->ready = true;
+                            state = TransmissionState::AwaitRequest;
+                        }
+                    }
+                    else 
+                    {
+                        // If error, restart from previous page
+                        putchar_raw(0x01);
+
+                        transmission->dataIndex -= transmission->pageIndex;
                         transmission->pageIndex = 0;
-                        state = TransmissionState::ReceiveTransmission;
+                        state = TransmissionState::ReceiveTransmissionLengthLow;
                         doNextStep = true;
                     }
-                    else
-                    {
-                        state = TransmissionState::AwaitRequest;
-                    }
-                }
-                else if (temp8 == 0x01)
-                {
-                    // If error, restart from previous page
-                    transmission->dataIndex -= transmission->pageIndex;
-                    transmission->pageIndex = 0;
-                    transmission->last_tansmission_time_us = time_us_32();
 
-                    state = TransmissionState::ReceiveTransmissionLengthLow;
-                    doNextStep = true;
+                    stdio_flush();
                 }
-
-                debug(temp8, 8);
 
                 break;
 
-            
             default:
                 break;
             }
 
             globalMaxState = state > globalMaxState ? state : globalMaxState;
-            debug(globalMaxState);
+            //debug(globalMaxState);
         }
     }
     else
