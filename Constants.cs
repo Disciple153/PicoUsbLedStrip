@@ -16,6 +16,8 @@ public static class Constants
     {
         Solid,
         Pulse,
-        Stream
+        Stream,
+        Fade,
+        Scroll
     };
 }

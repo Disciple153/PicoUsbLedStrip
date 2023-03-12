@@ -215,7 +215,7 @@ void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObj
 {
     Constants::DisplayMode displayMode = (Constants::DisplayMode) (*data)[0];
     uint8_t currentLedData[Constants::DATA_LENGTH];
-    uint16_t loopTime = 1000;
+    uint16_t loopTime;
 
     // Display based on displaymode
     switch (displayMode)
@@ -224,12 +224,14 @@ void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObj
     case (uint8_t) Constants::DisplayMode::Stream:
         break;
     case (uint8_t) Constants::DisplayMode::Pulse: // TODO
+        loopTime = (uint16_t) (*data)[1] | (uint16_t) (*data)[2] << 8;
+
         (*modeObject).timer += deltaTime;
         (*modeObject).timer %= loopTime;
 
         for (int i = 0; i < Constants::DATA_LENGTH; i++)
         {
-            currentLedData[i] = (*data)[1+i] * ((cos((2 * PI * (*modeObject).timer) / loopTime) + 1) / 2);
+            currentLedData[i] = (*data)[3+i] * ((cos((2 * PI * (*modeObject).timer) / loopTime) + 1) / 2);
         }
         
         setLeds(currentLedData, ledStrip);

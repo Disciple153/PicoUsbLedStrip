@@ -1,6 +1,7 @@
 ﻿// See https://aka.ms/new-console-template for more information
 using Microsoft.Win32;
 using System.Diagnostics;
+using System.Drawing;
 using System.IO.Ports;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -14,6 +15,9 @@ class DeskDisplay
     {
         SerialPort? serialPort = null;
         List<byte> leds;
+        string result = "";
+        Stopwatch stopWatch;
+        short loopTime;
 
         try
         {
@@ -26,55 +30,84 @@ class DeskDisplay
                 throw new Exception("DeskDisplay not found.");
             }
 
-            //leds = new List<byte>
-            //{
-            //    (byte)Constants.DisplayMode.Pulse
-            //};
+            Constants.DisplayMode displayMode = Constants.DisplayMode.Pulse;
+            Color color = Color.FromArgb(0x80, 0x00, 0xFF);
 
-            //for (int j = 0; j < Constants.LED_STRIP_LENGTH; j++)
-            //{
-            //    leds.Add(0x80);// (byte)((0xFF * i) / LED_STRIP_LENGTH);
-            //    leds.Add(0x00);// (byte)((0xFF * i) / LED_STRIP_LENGTH);
-            //    leds.Add(0xFF);// (byte)((0xFF * i) / LED_STRIP_LENGTH);
-            //}
-
-            //string result = WriteToSerialPort(serialPort, leds);
-
-            //if (result == Constants.SUCCESS)
-            //{
-            //    Console.WriteLine("Success");
-            //}
-            //else
-            //{
-            //    Console.WriteLine("Failure");
-            //}
-
-
-            Stopwatch stopWatch = new Stopwatch();
-            stopWatch.Start();
-
-            for (byte i = 0x00; i < 0xFF; i++)
+            switch (displayMode)
             {
-                leds = new List<byte>
-                {
-                    (byte)Constants.DisplayMode.Stream
-                };
+                case Constants.DisplayMode.Solid:
+                    leds = new List<byte>
+                    {
+                        (byte)displayMode
+                    };
 
-                for (int j = 0; j < Constants.LED_STRIP_LENGTH; j++)
-                {
-                    leds.Add(i);// (byte)((0xFF * i) / LED_STRIP_LENGTH);
-                    leds.Add(i);// (byte)((0xFF * i) / LED_STRIP_LENGTH);
-                    leds.Add(i);// (byte)((0xFF * i) / LED_STRIP_LENGTH);
-                }
+                    for (int j = 0; j < Constants.LED_STRIP_LENGTH; j++)
+                    {
+                        leds.Add(color.R);// (byte)((0xFF * i) / LED_STRIP_LENGTH);
+                        leds.Add(color.G);// (byte)((0xFF * i) / LED_STRIP_LENGTH);
+                        leds.Add(color.B);// (byte)((0xFF * i) / LED_STRIP_LENGTH);
+                    }
 
-                WriteToSerialPort(serialPort, leds);
+                    result = WriteToSerialPort(serialPort, leds);
+                    break;
 
+                case Constants.DisplayMode.Pulse:
+                    loopTime = 0x1000;
 
+                    Console.WriteLine(((byte)loopTime).ToString("X"));
+                    Console.WriteLine(((byte)(loopTime >> 8)).ToString("X"));
+
+                    leds = new List<byte>
+                    {
+                        (byte)displayMode,
+                        (byte)loopTime, // Pulse Speed Low
+                        (byte)(loopTime >> 8), // Pulse Speed High
+                    };
+
+                    for (int j = 0; j < Constants.LED_STRIP_LENGTH; j++)
+                    {
+                        leds.Add(color.R);// (byte)((0xFF * i) / LED_STRIP_LENGTH);
+                        leds.Add(color.G);// (byte)((0xFF * i) / LED_STRIP_LENGTH);
+                        leds.Add(color.B);// (byte)((0xFF * i) / LED_STRIP_LENGTH);
+                    }
+
+                    result = WriteToSerialPort(serialPort, leds);
+                    break;
+
+                case Constants.DisplayMode.Stream:
+                    stopWatch = new Stopwatch();
+                    stopWatch.Start();
+
+                    for (byte i = 0x00; i < 0xFF; i++)
+                    {
+                        leds = new List<byte>
+                        {
+                            (byte)Constants.DisplayMode.Stream
+                        };
+
+                        for (int j = 0; j < Constants.LED_STRIP_LENGTH; j++)
+                        {
+                            leds.Add((byte)(color.R * ((float) i / 0xFF)));
+                            leds.Add((byte)(color.G * ((float) i / 0xFF)));
+                            leds.Add((byte)(color.B * ((float) i / 0xFF)));
+                        }
+
+                        result = WriteToSerialPort(serialPort, leds);
+                    }
+
+                    stopWatch.Stop();
+                    Console.WriteLine(1f / (stopWatch.Elapsed.TotalSeconds / 0xFF) + " FPS");
+                    break;
             }
 
-            stopWatch.Stop();
-
-            Console.WriteLine(1f / (stopWatch.Elapsed.TotalSeconds / 0xFF) + " FPS");
+            if (result == Constants.SUCCESS)
+            {
+                Console.WriteLine("Success");
+            }
+            else
+            {
+                Console.WriteLine("Failure");
+            }
 
         }
         finally
