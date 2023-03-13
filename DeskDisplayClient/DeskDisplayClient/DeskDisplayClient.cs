@@ -269,7 +269,7 @@ class DeskDisplay
 
                 if (deviceName == Constants.ROM_ID)  
                 {
-                    Thread.Sleep(Constants.TRANSMISSION_TIMEOUT_MS + 1);
+                    serialPort.ReadTo(Constants.TIMEOUT + "\r\n");
                     break;
                 }
                 else
