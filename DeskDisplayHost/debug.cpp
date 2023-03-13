@@ -27,5 +27,5 @@ void Debug::print(uint8_t value, uint8_t offset)
         }
         
     }
-    Debug::ledStrip->show();
+    //Debug::ledStrip->show();
 }

@@ -13,7 +13,7 @@
 #define class namespace
 #define public
 #define static
-#define string const char*
+#define string char*
 #define byte uint8_t
 #include "../Constants.cs"
 ;
@@ -66,14 +66,10 @@ struct ModeObject {
 const uint16_t DATA_SIZE = ((Constants::DATA_LENGTH + FLASH_SECTOR_SIZE - 1) / FLASH_SECTOR_SIZE) * FLASH_SECTOR_SIZE;
 
 void setLeds(uint8_t data[], WS2812 ledStrip);
-void displayModeReload(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject);
 void displayModeInit(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject);
 void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject, uint8_t deltaTime);
 void displayload(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject);
 TransmissionState transmissionStateMachine(TransmissionState state, Transmission* transmission);
-
-// TODO delete
-TransmissionState globalMaxState = TransmissionState::AwaitRequest;
 
 int main() {
     uint8_t debugIndex = 0;
@@ -125,7 +121,7 @@ int main() {
     // Read data from flash
     transmission.data = WritableArray::read((const uint8_t *) FLASH_OFFSET);
 
-    displayModeReload(transmission.data, ledStrip, &modeObject);
+    displayModeInit(transmission.data, ledStrip, &modeObject);
 
     // Reset deltaTime
     currentTimeTime_us = time_us_32();
@@ -191,6 +187,7 @@ void displayModeInit(WritableArray* data, WS2812 ledStrip, ModeObject* modeObjec
         break;
 
     case (uint8_t) Constants::DisplayMode::Pulse:
+    case (uint8_t) Constants::DisplayMode::Scroll:
         
         (*modeObject).timer = 0;
         break;
@@ -216,6 +213,7 @@ void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObj
     Constants::DisplayMode displayMode = (Constants::DisplayMode) (*data)[0];
     uint8_t currentLedData[Constants::DATA_LENGTH];
     uint16_t loopTime;
+    int offset;
 
     // Display based on displaymode
     switch (displayMode)
@@ -223,7 +221,7 @@ void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObj
     case (uint8_t) Constants::DisplayMode::Solid:
     case (uint8_t) Constants::DisplayMode::Stream:
         break;
-    case (uint8_t) Constants::DisplayMode::Pulse: // TODO
+    case (uint8_t) Constants::DisplayMode::Pulse:
         loopTime = (uint16_t) (*data)[1] | (uint16_t) (*data)[2] << 8;
 
         (*modeObject).timer += deltaTime;
@@ -238,39 +236,30 @@ void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObj
         ledStrip.show();
         break;
 
+    case (uint8_t) Constants::DisplayMode::Scroll:
+        loopTime = (uint16_t) (*data)[1] | (uint16_t) (*data)[2] << 8;
+
+        (*modeObject).timer += deltaTime;
+        (*modeObject).timer %= loopTime;
+
+        offset = (((int)(*modeObject).timer * Constants::LED_STRIP_LENGTH) / (int)loopTime) * 3;
+
+        for (int i = 0; i < Constants::DATA_LENGTH; i++)
+        {
+            currentLedData[i] = (*data)[3 + ((i + offset) % Constants::DATA_LENGTH)];
+        }
+        
+        setLeds(currentLedData, ledStrip);
+        ledStrip.show();
+        sleep_ms(10);
+        break;
+
     default:
         ledStrip.fill(WS2812::RGB(0x00, 0x00, 0x00));
         for (int i = 0; i < 8; i++)
         {
             if (1 << i & displayMode) {
                 ledStrip.setPixelColor(i+2, WS2812::RGB(0x00, 0xFF, 0x00));
-            }
-        }
-        ledStrip.show();
-        break;
-    }
-}
-
-void displayModeReload(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject)
-{
-    Constants::DisplayMode displayMode = (Constants::DisplayMode) (*data)[0];
-
-    switch (displayMode)
-    {
-    case (uint8_t) Constants::DisplayMode::Solid:
-        setLeds(&(*data)[1], ledStrip);
-        ledStrip.show();
-        break;
-
-    case (uint8_t) Constants::DisplayMode::Pulse: // TODO
-        break;
-
-    default:
-        ledStrip.fill(WS2812::RGB(0x00, 0x00, 0x00));
-        for (int i = 0; i < 8; i++)
-        {
-            if (1 << i & displayMode) {
-                ledStrip.setPixelColor(i, WS2812::RGB(0x00, 0x00, 0xFF));
             }
         }
         ledStrip.show();
@@ -295,13 +284,15 @@ TransmissionState transmissionStateMachine(TransmissionState state, Transmission
             {
             case TransmissionState::AwaitRequest:
                 if ((uint8_t) getchar_timeout_us(0) == (uint8_t) Constants::START_CODE)
+                {
                     transmission->ready = false;
-                    transmission->last_tansmission_time_us = time_us_32();
 
                     state = TransmissionState::RespondRomId;
                     doNextStep = true;
+                }
 
-                    // Debug::print(0);
+                transmission->last_tansmission_time_us = time_us_32();
+
                 break;
 
             case TransmissionState::RespondRomId:
@@ -322,8 +313,6 @@ TransmissionState transmissionStateMachine(TransmissionState state, Transmission
                     doNextStep = true;
                 }
 
-                // Debug::print(temp16, 1);
-
                 break;
 
             case TransmissionState::ReceiveTransmissionLengthHigh:
@@ -333,7 +322,6 @@ TransmissionState transmissionStateMachine(TransmissionState state, Transmission
                 {
                     transmission->length |= temp16 << 8;
 
-                    // FIXME. Data cannot be written to data when this is called twice
                     delete transmission->data;
                     transmission->data = nullptr;
                     transmission->data = new WritableArray(transmission->length);
@@ -345,8 +333,6 @@ TransmissionState transmissionStateMachine(TransmissionState state, Transmission
                     state = TransmissionState::ReceiveTransmission;
                     doNextStep = true;
                 }
-
-                // Debug::print(temp16, 2);
 
                 break;
 
@@ -367,8 +353,6 @@ TransmissionState transmissionStateMachine(TransmissionState state, Transmission
                     
                     doNextStep = true;
                 }
-
-                // Debug::print(temp16, 3);
 
                 break;
 
@@ -423,16 +407,11 @@ TransmissionState transmissionStateMachine(TransmissionState state, Transmission
                     stdio_flush();
                 }
 
-                // Debug::print(temp16, 4);
-
                 break;
 
             default:
                 break;
             }
-
-            globalMaxState = state > globalMaxState ? state : globalMaxState;
-            // Debug::print(globalMaxState);
         }
     }
     else if (!stdio_usb_connected())
@@ -443,6 +422,7 @@ TransmissionState transmissionStateMachine(TransmissionState state, Transmission
     {
         state = TransmissionState::AwaitRequest;
         transmission->last_tansmission_time_us = time_us_32();
+        printf("%s\n", Constants::TIMEOUT);
     }
 
     return state;

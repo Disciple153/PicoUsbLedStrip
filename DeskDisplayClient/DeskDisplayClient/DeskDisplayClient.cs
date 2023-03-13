@@ -3,7 +3,7 @@ using Microsoft.Win32;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO.Ports;
-using System.Text;
+using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 
 class DeskDisplay
@@ -30,8 +30,9 @@ class DeskDisplay
                 throw new Exception("DeskDisplay not found.");
             }
 
-            Constants.DisplayMode displayMode = Constants.DisplayMode.Pulse;
-            Color color = Color.FromArgb(0x80, 0x00, 0xFF);
+            Constants.DisplayMode displayMode = Constants.DisplayMode.Scroll;
+            Color color1 = Color.FromArgb(0x80, 0x00, 0xFF);
+            Color color2 = Color.FromArgb(0x00, 0xFF, 0x00);
 
             switch (displayMode)
             {
@@ -41,11 +42,11 @@ class DeskDisplay
                         (byte)displayMode
                     };
 
-                    for (int j = 0; j < Constants.LED_STRIP_LENGTH; j++)
+                    for (int i = 0; i < Constants.LED_STRIP_LENGTH; i++)
                     {
-                        leds.Add(color.R);// (byte)((0xFF * i) / LED_STRIP_LENGTH);
-                        leds.Add(color.G);// (byte)((0xFF * i) / LED_STRIP_LENGTH);
-                        leds.Add(color.B);// (byte)((0xFF * i) / LED_STRIP_LENGTH);
+                        leds.Add(color1.R);
+                        leds.Add(color1.G);
+                        leds.Add(color1.B);
                     }
 
                     result = WriteToSerialPort(serialPort, leds);
@@ -54,8 +55,26 @@ class DeskDisplay
                 case Constants.DisplayMode.Pulse:
                     loopTime = 0x1000;
 
-                    Console.WriteLine(((byte)loopTime).ToString("X"));
-                    Console.WriteLine(((byte)(loopTime >> 8)).ToString("X"));
+                    leds = new List<byte>
+                    {
+                        (byte)displayMode,
+                        (byte)loopTime, // Pulse Speed Low
+                        (byte)(loopTime >> 8), // Pulse Speed High
+                    };
+
+                    for (int i = 0; i < Constants.LED_STRIP_LENGTH; i++)
+                    {
+                        leds.Add(color1.R);
+                        leds.Add(color1.G);
+                        leds.Add(color1.B);
+                    }
+
+                    result = WriteToSerialPort(serialPort, leds);
+                    break;
+
+
+                case Constants.DisplayMode.Scroll:
+                    loopTime = 0x1000;
 
                     leds = new List<byte>
                     {
@@ -64,17 +83,25 @@ class DeskDisplay
                         (byte)(loopTime >> 8), // Pulse Speed High
                     };
 
-                    for (int j = 0; j < Constants.LED_STRIP_LENGTH; j++)
+                    for (int i = 0; i < Constants.LED_STRIP_LENGTH / 2; i++)
                     {
-                        leds.Add(color.R);// (byte)((0xFF * i) / LED_STRIP_LENGTH);
-                        leds.Add(color.G);// (byte)((0xFF * i) / LED_STRIP_LENGTH);
-                        leds.Add(color.B);// (byte)((0xFF * i) / LED_STRIP_LENGTH);
+                        leds.Add(color1.R);
+                        leds.Add(color1.G);
+                        leds.Add(color1.B);
+                    }
+
+                    for (int i = Constants.LED_STRIP_LENGTH / 2; i < Constants.LED_STRIP_LENGTH; i++)
+                    {
+                        leds.Add(color2.R);
+                        leds.Add(color2.G);
+                        leds.Add(color2.B);
                     }
 
                     result = WriteToSerialPort(serialPort, leds);
                     break;
 
                 case Constants.DisplayMode.Stream:
+                    //https://stackoverflow.com/questions/1483928/how-to-read-the-color-of-a-screen-pixel
                     stopWatch = new Stopwatch();
                     stopWatch.Start();
 
@@ -87,9 +114,9 @@ class DeskDisplay
 
                         for (int j = 0; j < Constants.LED_STRIP_LENGTH; j++)
                         {
-                            leds.Add((byte)(color.R * ((float) i / 0xFF)));
-                            leds.Add((byte)(color.G * ((float) i / 0xFF)));
-                            leds.Add((byte)(color.B * ((float) i / 0xFF)));
+                            leds.Add((byte)(color1.R * ((float) i / 0xFF)));
+                            leds.Add((byte)(color1.G * ((float) i / 0xFF)));
+                            leds.Add((byte)(color1.B * ((float) i / 0xFF)));
                         }
 
                         result = WriteToSerialPort(serialPort, leds);
@@ -100,13 +127,23 @@ class DeskDisplay
                     break;
             }
 
-            if (result == Constants.SUCCESS)
+            switch (result)
             {
-                Console.WriteLine("Success");
-            }
-            else
-            {
-                Console.WriteLine("Failure");
+                case Constants.SUCCESS:
+                    Console.WriteLine("Success");
+                    break;
+
+                case Constants.FAILURE:
+                    Console.WriteLine("Failure");
+                    break;
+
+                case Constants.TIMEOUT:
+                    Console.WriteLine("Timeout");
+                    break;
+
+                default:
+                    Console.WriteLine("Error");
+                    break;
             }
 
         }
@@ -123,23 +160,26 @@ class DeskDisplay
     private static string WriteToSerialPort(SerialPort serialPort, IEnumerable<byte> payload)
     {
 
-        // Get confirmation
+        // Discard any garbage
         serialPort.DiscardInBuffer();
+
+        // Ask to transmis
         serialPort.Write(new byte[] { (byte)Constants.START_CODE }, 0, 1);
 
-        string deviceName = "DD" + serialPort.ReadTo("DD\r\n");
+        // Receive ready response
+        string deviceName = serialPort.ReadTo(Constants.ROM_ID + "\r\n") + Constants.ROM_ID;
         //Console.WriteLine("WRITE: device name: " + deviceName);
 
-        // Payload
+        // Build payload
         LinkedList<byte> leds = new LinkedList<byte>(payload);
 
-        // Length
+        // Prepend length
         short length = (short) payload.Count();
 
         leds.AddFirst((byte) (length >> 8));
         leds.AddFirst((byte) length);
 
-        // Hash
+        // Build hash
         byte hash = 0;
 
         foreach (byte b in leds)
@@ -147,9 +187,10 @@ class DeskDisplay
             hash += b;
         }
 
+        // Append hash
         leds.AddLast(hash);
 
-        // Write
+        // Write payload
         serialPort.Write(leds.ToArray(), 0, leds.Count);
 
         // Get response
