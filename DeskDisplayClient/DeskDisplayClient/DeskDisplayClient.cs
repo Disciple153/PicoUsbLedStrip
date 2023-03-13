@@ -30,7 +30,7 @@ class DeskDisplay
                 throw new Exception("DeskDisplay not found.");
             }
 
-            Constants.DisplayMode displayMode = Constants.DisplayMode.Scroll;
+            Constants.DisplayMode displayMode = Constants.DisplayMode.Stream;
             Color color1 = Color.FromArgb(0x80, 0x00, 0xFF);
             Color color2 = Color.FromArgb(0x00, 0xFF, 0x00);
 

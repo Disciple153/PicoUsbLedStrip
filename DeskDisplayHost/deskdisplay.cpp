@@ -65,11 +65,11 @@ struct ModeObject {
 
 const uint16_t DATA_SIZE = ((Constants::DATA_LENGTH + FLASH_SECTOR_SIZE - 1) / FLASH_SECTOR_SIZE) * FLASH_SECTOR_SIZE;
 
-void setLeds(uint8_t data[], WS2812 ledStrip);
+void setLeds(WS2812 ledStrip, uint8_t* data, uint8_t brightness, float offset);
 void displayModeInit(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject);
 void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject, uint8_t deltaTime);
 void displayload(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject);
-TransmissionState transmissionStateMachine(TransmissionState state, Transmission* transmission);
+TransmissionState transmissionStateMachine(TransmissionState state, Transmission* transmission, uint32_t deltaTime_ms);
 
 int main() {
     uint8_t debugIndex = 0;
@@ -136,7 +136,7 @@ int main() {
         deltaTime_ms = (currentTimeTime_us - prevTime_us) / 1000;
 
         // Get data
-        transmissionState = transmissionStateMachine(transmissionState, &transmission);
+        transmissionState = transmissionStateMachine(transmissionState, &transmission, deltaTime_ms);
 
         // If there is new data, initialize display
         if (transmission.ready && !transmission.read)
@@ -158,16 +158,15 @@ int main() {
     }
 }
 
-void setLeds(uint8_t data[], WS2812 ledStrip)
+void setLeds(WS2812 ledStrip, uint8_t* data, uint8_t brightness = 0xff, float offset = 0)
 {
-    // Display data received
     for (int i = 0; i < ledStrip.length; i++)
     {
         ledStrip.setPixelColor(i,
             WS2812::RGB(
-                data[(3 * i) + 0],
-                data[(3 * i) + 1],
-                data[(3 * i) + 2]
+                ((uint16_t) data[0 + (3 * ((i + (int)offset) % ledStrip.length))] * (uint16_t) brightness) / 0xFF,
+                ((uint16_t) data[1 + (3 * ((i + (int)offset) % ledStrip.length))] * (uint16_t) brightness) / 0xFF,
+                ((uint16_t) data[2 + (3 * ((i + (int)offset) % ledStrip.length))] * (uint16_t) brightness) / 0xFF
             )
         );
     }
@@ -182,7 +181,7 @@ void displayModeInit(WritableArray* data, WS2812 ledStrip, ModeObject* modeObjec
     {
     case (uint8_t) Constants::DisplayMode::Solid:
     case (uint8_t) Constants::DisplayMode::Stream:
-        setLeds(&(*data)[1], ledStrip);
+        setLeds(ledStrip, &(*data)[1]);
         ledStrip.show();
         break;
 
@@ -226,14 +225,10 @@ void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObj
 
         (*modeObject).timer += deltaTime;
         (*modeObject).timer %= loopTime;
-
-        for (int i = 0; i < Constants::DATA_LENGTH; i++)
-        {
-            currentLedData[i] = (*data)[3+i] * ((cos((2 * PI * (*modeObject).timer) / loopTime) + 1) / 2);
-        }
         
-        setLeds(currentLedData, ledStrip);
+        setLeds(ledStrip, &(*data)[3], (0xFF * (cos((2 * PI * (*modeObject).timer) / loopTime) + 1)) / 2);
         ledStrip.show();
+        sleep_ms(10);
         break;
 
     case (uint8_t) Constants::DisplayMode::Scroll:
@@ -241,15 +236,8 @@ void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObj
 
         (*modeObject).timer += deltaTime;
         (*modeObject).timer %= loopTime;
-
-        offset = (((int)(*modeObject).timer * Constants::LED_STRIP_LENGTH) / (int)loopTime) * 3;
-
-        for (int i = 0; i < Constants::DATA_LENGTH; i++)
-        {
-            currentLedData[i] = (*data)[3 + ((i + offset) % Constants::DATA_LENGTH)];
-        }
         
-        setLeds(currentLedData, ledStrip);
+        setLeds(ledStrip, &(*data)[3], 0xFF, ((int)(*modeObject).timer * Constants::LED_STRIP_LENGTH) / (int)loopTime);
         ledStrip.show();
         sleep_ms(10);
         break;
@@ -267,15 +255,17 @@ void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObj
     }
 }
 
-TransmissionState transmissionStateMachine(TransmissionState state, Transmission* transmission)
+TransmissionState transmissionStateMachine(TransmissionState state, Transmission* transmission, uint32_t deltaTime_ms)
 {
+    uint32_t time = time_us_32();
     int16_t temp16;
     uint8_t temp8;
     bool doNextStep = true;
 
     if (stdio_usb_connected() &&
-        time_us_32() - transmission->last_tansmission_time_us < Constants::TRANSMISSION_TIMEOUT_MS * 1000)
+        (time - transmission->last_tansmission_time_us) - (deltaTime_ms * 1000) < Constants::TRANSMISSION_TIMEOUT_MS * 1000)
     {
+
         while (doNextStep)
         {
             doNextStep = false;
@@ -291,7 +281,7 @@ TransmissionState transmissionStateMachine(TransmissionState state, Transmission
                     doNextStep = true;
                 }
 
-                transmission->last_tansmission_time_us = time_us_32();
+                transmission->last_tansmission_time_us = time;
 
                 break;
 
@@ -307,7 +297,7 @@ TransmissionState transmissionStateMachine(TransmissionState state, Transmission
                 if (temp16 != PICO_ERROR_TIMEOUT)
                 {
                     transmission->length = (uint8_t) temp16;
-                    transmission->last_tansmission_time_us = time_us_32();
+                    transmission->last_tansmission_time_us = time;
 
                     state = TransmissionState::ReceiveTransmissionLengthHigh;
                     doNextStep = true;
@@ -328,7 +318,7 @@ TransmissionState transmissionStateMachine(TransmissionState state, Transmission
 
                     transmission->dataIndex = 0;
                     transmission->pageIndex = 0;
-                    transmission->last_tansmission_time_us = time_us_32();
+                    transmission->last_tansmission_time_us = time;
 
                     state = TransmissionState::ReceiveTransmission;
                     doNextStep = true;
@@ -343,7 +333,7 @@ TransmissionState transmissionStateMachine(TransmissionState state, Transmission
                 {
                     (*transmission->data)[transmission->dataIndex++] = (uint8_t) temp16;
                     transmission->pageIndex++;
-                    transmission->last_tansmission_time_us = time_us_32();
+                    transmission->last_tansmission_time_us = time;
 
                     if (!(transmission->dataIndex < transmission->length &&
                         transmission->pageIndex < Constants::SERIAL_PAGE_SIZE))
@@ -361,7 +351,7 @@ TransmissionState transmissionStateMachine(TransmissionState state, Transmission
 
                 if (temp16 != PICO_ERROR_TIMEOUT)
                 {
-                    transmission->last_tansmission_time_us = time_us_32();
+                    transmission->last_tansmission_time_us = time;
 
                     // Add the length to the hash
                     temp8 = (*transmission->data).length();
@@ -421,7 +411,7 @@ TransmissionState transmissionStateMachine(TransmissionState state, Transmission
     else
     {
         state = TransmissionState::AwaitRequest;
-        transmission->last_tansmission_time_us = time_us_32();
+        transmission->last_tansmission_time_us = time;
         printf("%s\n", Constants::TIMEOUT);
     }
 
