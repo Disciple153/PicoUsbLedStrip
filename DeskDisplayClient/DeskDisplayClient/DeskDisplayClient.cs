@@ -17,7 +17,7 @@ class DeskDisplay
         List<byte> leds;
         string result = "";
         Stopwatch stopWatch;
-        short loopTime;
+        ushort loopTime;
 
         try
         {
@@ -30,7 +30,7 @@ class DeskDisplay
                 throw new Exception("DeskDisplay not found.");
             }
 
-            Constants.DisplayMode displayMode = Constants.DisplayMode.Stream;
+            Constants.DisplayMode displayMode = Constants.DisplayMode.Scroll;
             Color color1 = Color.FromArgb(0x80, 0x00, 0xFF);
             Color color2 = Color.FromArgb(0x00, 0xFF, 0x00);
 
@@ -74,7 +74,7 @@ class DeskDisplay
 
 
                 case Constants.DisplayMode.Scroll:
-                    loopTime = 0x1000;
+                    loopTime = 0x8000;
 
                     leds = new List<byte>
                     {
@@ -174,7 +174,7 @@ class DeskDisplay
         LinkedList<byte> leds = new LinkedList<byte>(payload);
 
         // Prepend length
-        short length = (short) payload.Count();
+        ushort length = (ushort) payload.Count();
 
         leds.AddFirst((byte) (length >> 8));
         leds.AddFirst((byte) length);

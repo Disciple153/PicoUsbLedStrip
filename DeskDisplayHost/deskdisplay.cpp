@@ -66,6 +66,8 @@ struct ModeObject {
 const uint16_t DATA_SIZE = ((Constants::DATA_LENGTH + FLASH_SECTOR_SIZE - 1) / FLASH_SECTOR_SIZE) * FLASH_SECTOR_SIZE;
 
 void setLeds(WS2812 ledStrip, uint8_t* data, uint8_t brightness, float offset);
+uint8_t antiAlias(uint8_t* data, uint16_t index, size_t length, uint8_t colorComponent, float offset);
+uint8_t getSubPixel(uint8_t* data, uint16_t index, size_t length, uint8_t colorComponent, uint16_t offset);
 void displayModeInit(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject);
 void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject, uint8_t deltaTime);
 void displayload(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject);
@@ -160,16 +162,28 @@ int main() {
 
 void setLeds(WS2812 ledStrip, uint8_t* data, uint8_t brightness = 0xff, float offset = 0)
 {
-    for (int i = 0; i < ledStrip.length; i++)
+    for (uint16_t i = 0; i < ledStrip.length; i++)
     {
         ledStrip.setPixelColor(i,
             WS2812::RGB(
-                ((uint16_t) data[0 + (3 * ((i + (int)offset) % ledStrip.length))] * (uint16_t) brightness) / 0xFF,
-                ((uint16_t) data[1 + (3 * ((i + (int)offset) % ledStrip.length))] * (uint16_t) brightness) / 0xFF,
-                ((uint16_t) data[2 + (3 * ((i + (int)offset) % ledStrip.length))] * (uint16_t) brightness) / 0xFF
+                ((uint16_t) antiAlias(data, i, ledStrip.length, 0, offset) * (uint16_t) brightness) / 0xFF,
+                ((uint16_t) antiAlias(data, i, ledStrip.length, 1, offset) * (uint16_t) brightness) / 0xFF,
+                ((uint16_t) antiAlias(data, i, ledStrip.length, 2, offset) * (uint16_t) brightness) / 0xFF
             )
         );
     }
+}
+
+uint8_t antiAlias(uint8_t* data, uint16_t index, size_t length, uint8_t colorComponent, float offset)
+{
+    float offsetDecimal = fmod(offset, 1);
+    return (getSubPixel(data, index, length, colorComponent, (int)floor(offset)) * (1 - offsetDecimal)) + 
+           (getSubPixel(data, index, length, colorComponent, (int) ceil(offset)) * offsetDecimal);
+}
+
+uint8_t getSubPixel(uint8_t* data, uint16_t index, size_t length, uint8_t colorComponent, uint16_t offset)
+{
+    return data[colorComponent + (3 * ((index + offset) % length))];
 }
 
 void displayModeInit(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject)
@@ -210,9 +224,7 @@ void displayModeInit(WritableArray* data, WS2812 ledStrip, ModeObject* modeObjec
 void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject, uint8_t deltaTime)
 {
     Constants::DisplayMode displayMode = (Constants::DisplayMode) (*data)[0];
-    uint8_t currentLedData[Constants::DATA_LENGTH];
     uint16_t loopTime;
-    int offset;
 
     // Display based on displaymode
     switch (displayMode)
@@ -237,7 +249,7 @@ void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObj
         (*modeObject).timer += deltaTime;
         (*modeObject).timer %= loopTime;
         
-        setLeds(ledStrip, &(*data)[3], 0xFF, ((int)(*modeObject).timer * Constants::LED_STRIP_LENGTH) / (int)loopTime);
+        setLeds(ledStrip, &(*data)[3], 0xFF, ((float)(*modeObject).timer * Constants::LED_STRIP_LENGTH) / loopTime);
         ledStrip.show();
         sleep_ms(10);
         break;
