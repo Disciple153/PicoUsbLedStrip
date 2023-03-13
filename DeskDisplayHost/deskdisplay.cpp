@@ -422,9 +422,11 @@ TransmissionState transmissionStateMachine(TransmissionState state, Transmission
     }
     else
     {
+        if (state != TransmissionState::AwaitRequest)
+            printf("%s\n", Constants::TIMEOUT);
+            
         state = TransmissionState::AwaitRequest;
         transmission->last_tansmission_time_us = time;
-        printf("%s\n", Constants::TIMEOUT);
     }
 
     return state;
