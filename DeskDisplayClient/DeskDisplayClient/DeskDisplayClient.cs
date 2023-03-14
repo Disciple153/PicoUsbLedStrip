@@ -163,15 +163,14 @@ class DeskDisplay
         // Discard any garbage
         serialPort.DiscardInBuffer();
 
-        // Ask to transmis
+        // Ask to transmit
         serialPort.Write(new byte[] { (byte)Constants.START_CODE }, 0, 1);
 
         // Receive ready response
-        string deviceName = serialPort.ReadTo(Constants.ROM_ID + "\r\n") + Constants.ROM_ID;
-        //Console.WriteLine("WRITE: device name: " + deviceName);
+        serialPort.ReadTo(Constants.ROM_ID + "\r\n");
 
         // Build payload
-        LinkedList<byte> leds = new LinkedList<byte>(payload);
+        LinkedList<byte> leds = new(payload);
 
         // Prepend length
         ushort length = (ushort) payload.Count();
@@ -204,8 +203,8 @@ class DeskDisplay
     static List<string> ComPortNames(String VID, String PID)
     {
         String pattern = String.Format("^VID_{0}.PID_{1}", VID, PID);
-        Regex _rx = new Regex(pattern, RegexOptions.IgnoreCase);
-        List<string> comports = new List<string>();
+        Regex _rx = new(pattern, RegexOptions.IgnoreCase);
+        List<string> comports = new();
 
         RegistryKey rk1 = Registry.LocalMachine;
         RegistryKey rk2 = rk1.OpenSubKey("SYSTEM\\CurrentControlSet\\Enum");
@@ -261,7 +260,6 @@ class DeskDisplay
 
             try
             {
-
                 serialPort.DiscardInBuffer();
                 serialPort.Write(new byte[] { (byte)Constants.START_CODE }, 0, 1);
                 deviceName = serialPort.ReadLine().Trim('\r', '\n');
