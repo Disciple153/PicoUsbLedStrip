@@ -2,10 +2,13 @@
 #include "pico/stdlib.h"
 #include "hardware/gpio.h"
 #include "dependencies/WS2812.hpp"
+#include "dependencies/kiss_fftr.h"
 #include "writablearray.hpp"
 #include "debug.hpp"
 #include <hardware/flash.h>
 #include <hardware/sync.h>
+#include <hardware/adc.h>
+#include <hardware/dma.h>
 #include <cstdlib>
 #include <math.h>
 
@@ -29,6 +32,18 @@
 #define STATUS_LED 25
 #define FLASH_OFFSET 0x00100000u
 #define PI 3.14159265
+
+// BE CAREFUL: anything over about 0x2000 here will cause things
+// to silently break. The code will compile and upload, but due
+// to memory issues nothing will work properly
+#define DMA_BUFFER_SIZE 0x1000
+
+// set this to determine sample rate
+// 96    = 500,000 Hz
+// 960   = 50,000 Hz
+// 9600  = 5,000 Hz
+#define CLOCK_DIV (96 * 2)
+#define FSAMP (48000000 / CLOCK_DIV)
 
 // Raspberry pi GPIO
 /*
@@ -61,6 +76,11 @@ struct Transmission {
 
 struct ModeObject {
     uint16_t timer;
+    uint dmaChannel;
+    uint8_t dmaBuffer[DMA_BUFFER_SIZE];
+    dma_channel_config dmaCfg;
+    kiss_fftr_cfg fftConfig;
+    float dmaFrequencies[DMA_BUFFER_SIZE];
 };
 
 const uint16_t DATA_SIZE = ((Constants::DATA_LENGTH + FLASH_SECTOR_SIZE - 1) / FLASH_SECTOR_SIZE) * FLASH_SECTOR_SIZE;
@@ -94,6 +114,56 @@ int main() {
 
     stdio_init_all(); // Initialize usb
 
+    // ADC init
+    
+    adc_gpio_init(26 + 0);
+    adc_init();
+    adc_select_input(0);
+    adc_fifo_setup(
+		 true,    // Write each completed conversion to the sample FIFO
+		 true,    // Enable DMA data request (DREQ)
+		 1,       // DREQ (and IRQ) asserted when at least 1 sample present
+		 false,   // We won't see the ERR bit because of 8 bit reads; disable.
+		 true     // Shift each sample to 8 bits when pushing to FIFO
+	);
+    adc_set_clkdiv(CLOCK_DIV);
+    
+    modeObject.dmaChannel = dma_claim_unused_channel(true);
+    modeObject.dmaCfg = dma_channel_get_default_config(modeObject.dmaChannel);
+    
+    // Reading from constant address, writing to incrementing byte addresses
+    channel_config_set_transfer_data_size(&modeObject.dmaCfg, DMA_SIZE_8);
+    channel_config_set_read_increment(&modeObject.dmaCfg, false);
+    channel_config_set_write_increment(&modeObject.dmaCfg, true);
+
+    // Pace transfers based on availability of ADC samples
+    channel_config_set_dreq(&modeObject.dmaCfg, DREQ_ADC);
+
+    while(!stdio_usb_connected());
+
+    // calculate frequencies of each bin
+    for (int i = 0; i < DMA_BUFFER_SIZE; i++) 
+    {
+        modeObject.dmaFrequencies[i] = (FSAMP / DMA_BUFFER_SIZE) * i;
+        printf("%f, ", modeObject.dmaFrequencies[i]);
+    }
+
+
+    // // begin sampling
+    // adc_run(false);
+    // adc_fifo_drain();
+
+    // dma_channel_configure(modeObject.dmaChannel, &modeObject.dmaCfg,
+    //     modeObject.dmaBuffer, // dst
+    //     &adc_hw->fifo, // src
+    //     DMA_BUFFER_SIZE, // transfer count
+    //     true // start immediately
+    // );
+
+    // FFT
+    modeObject.fftConfig = kiss_fftr_alloc(DMA_BUFFER_SIZE, false, 0, 0);
+
+    // Status LED init
     gpio_init(STATUS_LED); // Initialize LED pin
     gpio_set_dir(STATUS_LED, GPIO_OUT); // Set LED pin as output
 
@@ -204,6 +274,10 @@ void displayModeInit(WritableArray* data, WS2812 ledStrip, ModeObject* modeObjec
         
         (*modeObject).timer = 0;
         break;
+
+    case (uint8_t) Constants::DisplayMode::SpectrumAnalyzer:
+        //adc_run(true);
+        break;
     
     default:
         ledStrip.fill(WS2812::RGB(0x00, 0x00, 0x00));
@@ -225,6 +299,14 @@ void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObj
 {
     Constants::DisplayMode displayMode = (Constants::DisplayMode) (*data)[0];
     uint16_t loopTime;
+    kiss_fft_scalar fftIn[DMA_BUFFER_SIZE];
+    kiss_fft_cpx fftOut[DMA_BUFFER_SIZE];
+    
+    uint64_t sum = 0;
+    float avg;
+    float max_power;
+    int max_idx;
+
 
     // Display based on displaymode
     switch (displayMode)
@@ -252,6 +334,50 @@ void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObj
         setLeds(ledStrip, &(*data)[3], 0xFF, ((float)(*modeObject).timer * Constants::LED_STRIP_LENGTH) / loopTime);
         ledStrip.show();
         sleep_ms(10);
+        break;
+
+    case (uint8_t) Constants::DisplayMode::SpectrumAnalyzer:
+        // begin sampling
+        adc_fifo_drain();
+        adc_run(false);
+
+        dma_channel_configure(modeObject->dmaChannel, &modeObject->dmaCfg,
+            modeObject->dmaBuffer, // dst
+            &adc_hw->fifo, // src
+            DMA_BUFFER_SIZE, // transfer count
+            true // start immediately
+        );
+
+        adc_run(true);
+        dma_channel_wait_for_finish_blocking(modeObject->dmaChannel);
+        //adc_run(false);
+
+        for (int i=0; i < DMA_BUFFER_SIZE; i++) {sum += modeObject->dmaBuffer[i];}
+        avg = (float)sum/DMA_BUFFER_SIZE;
+        for (int i=0; i < DMA_BUFFER_SIZE; i++) {fftIn[i] = (float)modeObject->dmaBuffer[i]-avg;}
+        
+        kiss_fftr(modeObject->fftConfig, fftIn, fftOut);
+
+        // compute power and calculate max freq component
+        max_power = 0;
+        max_idx = 0;
+        // any frequency bin over NSAMP/2 is aliased (nyquist sampling theorum)
+        for (int i = 0; i < DMA_BUFFER_SIZE/2; i++) {
+            float power = fftOut[i].r * fftOut[i].r + fftOut[i].i * fftOut[i].i;
+
+            if (power > max_power) {
+                max_power = power;
+                max_idx = i;
+            }
+        }
+
+        ledStrip.fill(WS2812::RGB(0x00, 0x00, 0x00));
+        ledStrip.setPixelColor((max_idx * Constants::LED_STRIP_LENGTH) / DMA_BUFFER_SIZE, WS2812::RGB(0xFF, 0xFF, 0xff));
+        ledStrip.show();
+
+        printf("%f\n", modeObject->dmaFrequencies[max_idx]);
+
+        // adc_run(true);
         break;
 
     default:

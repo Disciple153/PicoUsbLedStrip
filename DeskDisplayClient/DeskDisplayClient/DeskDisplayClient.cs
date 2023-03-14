@@ -30,12 +30,20 @@ class DeskDisplay
                 throw new Exception("DeskDisplay not found.");
             }
 
-            Constants.DisplayMode displayMode = Constants.DisplayMode.Scroll;
+            Constants.DisplayMode displayMode = Constants.DisplayMode.SpectrumAnalyzer;
             Color color1 = Color.FromArgb(0x80, 0x00, 0xFF);
             Color color2 = Color.FromArgb(0x00, 0xFF, 0x00);
 
             switch (displayMode)
             {
+                case Constants.DisplayMode.SpectrumAnalyzer:
+                    leds = new List<byte>
+                    {
+                        (byte)displayMode
+                    };
+                    result = WriteToSerialPort(serialPort, leds);
+                    break;
+
                 case Constants.DisplayMode.Solid:
                     leds = new List<byte>
                     {
