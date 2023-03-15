@@ -6,7 +6,14 @@ project(deskdisplay)
 
 pico_sdk_init()
 
-add_executable(deskdisplay deskdisplay.cpp dependencies/WS2812.cpp writablearray.cpp debug.cpp)
+add_executable(deskdisplay 
+    deskdisplay.cpp
+    dependencies/WS2812.cpp
+    writablearray.cpp
+    debug.cpp
+    fftData.cpp
+    kiss_fftr.cpp
+)
 add_library(kiss_fftr dependencies/kiss_fftr.c)
 add_library(kiss_fft dependencies/kiss_fft.c)
 

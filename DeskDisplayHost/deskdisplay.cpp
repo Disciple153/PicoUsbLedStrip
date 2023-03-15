@@ -32,6 +32,10 @@
 #define STATUS_LED 25
 #define FLASH_OFFSET 0x00100000u
 #define PI 3.14159265
+#define MAX_FREQ 5000
+#define MIN_FREQ 50
+#define AMP_CORRECTION_A 43
+#define AMP_CORRECTION_B 148
 
 // BE CAREFUL: anything over about 0x2000 here will cause things
 // to silently break. The code will compile and upload, but due
@@ -42,7 +46,7 @@
 // 96    = 500,000 Hz
 // 960   = 50,000 Hz
 // 9600  = 5,000 Hz
-#define CLOCK_DIV (96 * 2)
+#define CLOCK_DIV (96 * 100)
 #define FSAMP (48000000 / CLOCK_DIV)
 
 // Raspberry pi GPIO
@@ -79,8 +83,9 @@ struct ModeObject {
     uint dmaChannel;
     uint8_t dmaBuffer[DMA_BUFFER_SIZE];
     dma_channel_config dmaCfg;
-    kiss_fftr_cfg fftConfig;
     float dmaFrequencies[DMA_BUFFER_SIZE];
+    kiss_fftr_cfg fftConfig;
+    float fftMultiplier;
 };
 
 const uint16_t DATA_SIZE = ((Constants::DATA_LENGTH + FLASH_SECTOR_SIZE - 1) / FLASH_SECTOR_SIZE) * FLASH_SECTOR_SIZE;
@@ -88,6 +93,7 @@ const uint16_t DATA_SIZE = ((Constants::DATA_LENGTH + FLASH_SECTOR_SIZE - 1) / F
 void setLeds(WS2812 ledStrip, uint8_t* data, uint8_t brightness, float offset);
 uint8_t antiAlias(uint8_t* data, uint16_t index, size_t length, uint8_t colorComponent, float offset);
 uint8_t getSubPixel(uint8_t* data, uint16_t index, size_t length, uint8_t colorComponent, uint16_t offset);
+void sampleAdc(ModeObject* modeObject);
 void displayModeInit(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject);
 void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject, uint8_t deltaTime);
 void displayload(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject);
@@ -139,26 +145,13 @@ int main() {
     // Pace transfers based on availability of ADC samples
     channel_config_set_dreq(&modeObject.dmaCfg, DREQ_ADC);
 
-    while(!stdio_usb_connected());
-
     // calculate frequencies of each bin
     for (int i = 0; i < DMA_BUFFER_SIZE; i++) 
     {
         modeObject.dmaFrequencies[i] = (FSAMP / DMA_BUFFER_SIZE) * i;
-        printf("%f, ", modeObject.dmaFrequencies[i]);
     }
 
-
-    // // begin sampling
-    // adc_run(false);
-    // adc_fifo_drain();
-
-    // dma_channel_configure(modeObject.dmaChannel, &modeObject.dmaCfg,
-    //     modeObject.dmaBuffer, // dst
-    //     &adc_hw->fifo, // src
-    //     DMA_BUFFER_SIZE, // transfer count
-    //     true // start immediately
-    // );
+    modeObject.fftMultiplier = (float) (Constants::LED_STRIP_LENGTH - 1) / log(MAX_FREQ);
 
     // FFT
     modeObject.fftConfig = kiss_fftr_alloc(DMA_BUFFER_SIZE, false, 0, 0);
@@ -188,6 +181,7 @@ int main() {
     {
         (*transmission.data)[i] = 0;
     }
+    transmission.data.write();
 #endif
 
     // Read data from flash
@@ -220,13 +214,13 @@ int main() {
         // Update the display
         displayModeUpdate(transmission.data, ledStrip, &modeObject, deltaTime_ms);
 
-        // Heartbeat every second
-        heartbeatTimer += deltaTime_ms;
-        if (heartbeatTimer > 1000) {
-            gpio_put(STATUS_LED, statusLed);
-            statusLed = !statusLed;
-            heartbeatTimer = 0;
-        }
+        // // Heartbeat every second
+        // heartbeatTimer += deltaTime_ms;
+        // if (heartbeatTimer > 1000) {
+        //     gpio_put(STATUS_LED, statusLed);
+        //     statusLed = !statusLed;
+        //     heartbeatTimer = 0;
+        // }
     }
 }
 
@@ -256,6 +250,22 @@ uint8_t getSubPixel(uint8_t* data, uint16_t index, size_t length, uint8_t colorC
     return data[colorComponent + (3 * ((index + offset) % length))];
 }
 
+void sampleAdc(ModeObject* modeObject)
+{
+    // begin sampling
+    adc_fifo_drain();
+    adc_run(false);
+
+    dma_channel_configure(modeObject->dmaChannel, &modeObject->dmaCfg,
+        modeObject->dmaBuffer, // dst
+        &adc_hw->fifo, // src
+        DMA_BUFFER_SIZE, // transfer count
+        true // start immediately
+    );
+
+    adc_run(true);
+}
+
 void displayModeInit(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject)
 {
     Constants::DisplayMode displayMode = (Constants::DisplayMode) (*data)[0];
@@ -276,7 +286,8 @@ void displayModeInit(WritableArray* data, WS2812 ledStrip, ModeObject* modeObjec
         break;
 
     case (uint8_t) Constants::DisplayMode::SpectrumAnalyzer:
-        //adc_run(true);
+        // TODO adc_run(false) if not spectrumAnalyzer
+        sampleAdc(modeObject);
         break;
     
     default:
@@ -300,13 +311,19 @@ void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObj
     Constants::DisplayMode displayMode = (Constants::DisplayMode) (*data)[0];
     uint16_t loopTime;
     kiss_fft_scalar fftIn[DMA_BUFFER_SIZE];
-    kiss_fft_cpx fftOut[DMA_BUFFER_SIZE];
+    kiss_fft_cpx fftOut[(DMA_BUFFER_SIZE / 2) + 1];
+    
+    float pixelAmplitude[Constants::LED_STRIP_LENGTH];
+    float pixelFreq[Constants::LED_STRIP_LENGTH]; // TODO delete
+    uint8_t toDisplay[Constants::DATA_LENGTH];
     
     uint64_t sum = 0;
     float avg;
-    float max_power;
-    int max_idx;
-
+    float amplitude;
+    float maxAmplitude = 0;
+    float maxFreq = 0;
+    float brightness;
+    int pixel = 0;
 
     // Display based on displaymode
     switch (displayMode)
@@ -337,47 +354,85 @@ void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObj
         break;
 
     case (uint8_t) Constants::DisplayMode::SpectrumAnalyzer:
-        // begin sampling
-        adc_fifo_drain();
-        adc_run(false);
-
-        dma_channel_configure(modeObject->dmaChannel, &modeObject->dmaCfg,
-            modeObject->dmaBuffer, // dst
-            &adc_hw->fifo, // src
-            DMA_BUFFER_SIZE, // transfer count
-            true // start immediately
-        );
-
-        adc_run(true);
+        // Wait to finish sampling
         dma_channel_wait_for_finish_blocking(modeObject->dmaChannel);
-        //adc_run(false);
+        gpio_put(STATUS_LED, 0);
 
         for (int i=0; i < DMA_BUFFER_SIZE; i++) {sum += modeObject->dmaBuffer[i];}
         avg = (float)sum/DMA_BUFFER_SIZE;
         for (int i=0; i < DMA_BUFFER_SIZE; i++) {fftIn[i] = (float)modeObject->dmaBuffer[i]-avg;}
+
+
+        // begin sampling
+        sampleAdc(modeObject);
+        gpio_put(STATUS_LED, 1);
         
+        // compute fft
         kiss_fftr(modeObject->fftConfig, fftIn, fftOut);
 
-        // compute power and calculate max freq component
-        max_power = 0;
-        max_idx = 0;
-        // any frequency bin over NSAMP/2 is aliased (nyquist sampling theorum)
-        for (int i = 0; i < DMA_BUFFER_SIZE/2; i++) {
-            float power = fftOut[i].r * fftOut[i].r + fftOut[i].i * fftOut[i].i;
+        // pixel = modeObject->fftMultiplier * log(modeObject->dmaFrequencies[max_idx] + 1 - MIN_FREQ);
+        // if (pixel < 0) pixel = 0;
+        // if (pixel > Constants::LED_STRIP_LENGTH) pixel = Constants::LED_STRIP_LENGTH - 1;
 
-            if (power > max_power) {
-                max_power = power;
-                max_idx = i;
+        // ledStrip.fill(WS2812::RGB(0x00, 0x00, 0x00));
+        // ledStrip.setPixelColor(pixel, WS2812::RGB(0xFF, 0xFF, 0xff));
+        // ledStrip.show();
+
+        //printf("%d, %f\n", pixel, modeObject->dmaFrequencies[max_idx]);
+
+        // Zero out all values
+        for (int i = 0; i < Constants::LED_STRIP_LENGTH; i++)
+        {
+            pixelAmplitude[i] = 0;
+            pixelFreq[i] = 0;
+        }
+
+        // Calculate the brightness of each pixel
+        for (int i = 0; i < DMA_BUFFER_SIZE/2; i++)
+        {
+            // Get the affectted pixel
+            pixel = modeObject->fftMultiplier * log(modeObject->dmaFrequencies[i] + 1 - MIN_FREQ);
+
+            // Get the amplitude of the data relative to the frequency
+            amplitude = (fftOut[i].r * fftOut[i].r + fftOut[i].i * fftOut[i].i) /
+                ((AMP_CORRECTION_A * log(modeObject->dmaFrequencies[i])) - AMP_CORRECTION_B);
+
+            // Store the value of the most significant frequency
+            if (0 < pixel && pixel < Constants::LED_STRIP_LENGTH &&
+                amplitude > pixelAmplitude[pixel])
+            {
+                pixelAmplitude[pixel] = amplitude;
+                pixelFreq[pixel] = modeObject->dmaFrequencies[i];
+
+                if (amplitude > maxAmplitude)
+                {
+                    maxAmplitude = amplitude;
+                    maxFreq = pixelFreq[pixel];
+                }
             }
         }
 
-        ledStrip.fill(WS2812::RGB(0x00, 0x00, 0x00));
-        ledStrip.setPixelColor((max_idx * Constants::LED_STRIP_LENGTH) / DMA_BUFFER_SIZE, WS2812::RGB(0xFF, 0xFF, 0xff));
+        // for (int i = 0; i < Constants::LED_STRIP_LENGTH; i++ )
+        // {
+        //     printf("%f,", pixelFreq[i]);
+        // }
+        // printf("\n");
+
+        // Apply brightness data to pixels
+        for (int i = 0; i < Constants::LED_STRIP_LENGTH; i++ )
+        {
+            brightness = pixelAmplitude[i] / maxAmplitude;
+            toDisplay[(i * 3) + 0] = brightness * 0xFF;
+            toDisplay[(i * 3) + 1] = brightness * 0xFF;
+            toDisplay[(i * 3) + 2] = brightness * 0xFF;
+            //printf("%f,", pixelAmplitude[i]);
+        }
+        //printf("\n");
+        printf("Max Frequency: %f\n", maxFreq);
+
+        setLeds(ledStrip, toDisplay);
         ledStrip.show();
 
-        printf("%f\n", modeObject->dmaFrequencies[max_idx]);
-
-        // adc_run(true);
         break;
 
     default:
