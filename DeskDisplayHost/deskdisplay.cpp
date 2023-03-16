@@ -4,6 +4,7 @@
 #include "dependencies/WS2812.hpp"
 #include "dependencies/kiss_fftr.h"
 #include "writablearray.hpp"
+#include "fftData.hpp"
 #include "debug.hpp"
 #include <hardware/flash.h>
 #include <hardware/sync.h>
@@ -36,11 +37,8 @@
 #define MIN_FREQ 50
 #define AMP_CORRECTION_A 43
 #define AMP_CORRECTION_B 148
-
-// BE CAREFUL: anything over about 0x2000 here will cause things
-// to silently break. The code will compile and upload, but due
-// to memory issues nothing will work properly
-#define DMA_BUFFER_SIZE 0x1000
+#define PARTITION_LENGTH 0x100 // TODO  Make this as small as possible while still forcing a wait at `dma_channel_wait_for_finish_blocking()`
+#define PARTITION_COUNT 0x11 // TODO  Make this as large as desired for a balance of resolution and smoothing
 
 // set this to determine sample rate
 // 96    = 500,000 Hz
@@ -81,9 +79,9 @@ struct Transmission {
 struct ModeObject {
     uint16_t timer;
     uint dmaChannel;
-    uint8_t dmaBuffer[DMA_BUFFER_SIZE];
     dma_channel_config dmaCfg;
-    float dmaFrequencies[DMA_BUFFER_SIZE];
+    FftData* dmaBuffer;
+    float dmaFrequencies[PARTITION_LENGTH * PARTITION_COUNT];
     kiss_fftr_cfg fftConfig;
     float fftMultiplier;
 };
@@ -103,6 +101,7 @@ int main() {
     uint8_t debugIndex = 0;
 
     ModeObject modeObject;
+    modeObject.dmaBuffer = new FftData(PARTITION_LENGTH, PARTITION_COUNT);
 
     TransmissionState transmissionState = TransmissionState::AwaitRequest;
     TransmissionState maxTransmissionState = TransmissionState::AwaitRequest;
@@ -146,15 +145,15 @@ int main() {
     channel_config_set_dreq(&modeObject.dmaCfg, DREQ_ADC);
 
     // calculate frequencies of each bin
-    for (int i = 0; i < DMA_BUFFER_SIZE; i++) 
+    for (int i = 0; i < modeObject.dmaBuffer->length(); i++) 
     {
-        modeObject.dmaFrequencies[i] = (FSAMP / DMA_BUFFER_SIZE) * i;
+        modeObject.dmaFrequencies[i] = (FSAMP / modeObject.dmaBuffer->length()) * i;
     }
 
     modeObject.fftMultiplier = (float) (Constants::LED_STRIP_LENGTH - 1) / log(MAX_FREQ);
 
     // FFT
-    modeObject.fftConfig = kiss_fftr_alloc(DMA_BUFFER_SIZE, false, 0, 0);
+    modeObject.fftConfig = kiss_fftr_alloc(modeObject.dmaBuffer->length(), false, 0, 0);
 
     // Status LED init
     gpio_init(STATUS_LED); // Initialize LED pin
@@ -257,9 +256,9 @@ void sampleAdc(ModeObject* modeObject)
     adc_run(false);
 
     dma_channel_configure(modeObject->dmaChannel, &modeObject->dmaCfg,
-        modeObject->dmaBuffer, // dst
+        modeObject->dmaBuffer->getNextPartition(), // dst
         &adc_hw->fifo, // src
-        DMA_BUFFER_SIZE, // transfer count
+        modeObject->dmaBuffer->partitionLength, // transfer count
         true // start immediately
     );
 
@@ -310,8 +309,8 @@ void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObj
 {
     Constants::DisplayMode displayMode = (Constants::DisplayMode) (*data)[0];
     uint16_t loopTime;
-    kiss_fft_scalar fftIn[DMA_BUFFER_SIZE];
-    kiss_fft_cpx fftOut[(DMA_BUFFER_SIZE / 2) + 1];
+    kiss_fft_scalar fftIn[modeObject->dmaBuffer->length()];
+    kiss_fft_cpx fftOut[(modeObject->dmaBuffer->length() / 2) + 1];
     
     float pixelAmplitude[Constants::LED_STRIP_LENGTH];
     float pixelFreq[Constants::LED_STRIP_LENGTH]; // TODO delete
@@ -355,13 +354,19 @@ void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObj
 
     case (uint8_t) Constants::DisplayMode::SpectrumAnalyzer:
         // Wait to finish sampling
+        // TODO time this with and without a sleep before to find how many ns this should take with no waiting.
         dma_channel_wait_for_finish_blocking(modeObject->dmaChannel);
         gpio_put(STATUS_LED, 0);
 
-        for (int i=0; i < DMA_BUFFER_SIZE; i++) {sum += modeObject->dmaBuffer[i];}
-        avg = (float)sum/DMA_BUFFER_SIZE;
-        for (int i=0; i < DMA_BUFFER_SIZE; i++) {fftIn[i] = (float)modeObject->dmaBuffer[i]-avg;}
-
+        for (int i=0; i < modeObject->dmaBuffer->length(); i++)
+        {
+            sum += modeObject->dmaBuffer->getFromNextPartitionAsFloat(i);
+        }
+        avg = (float)sum / modeObject->dmaBuffer->length();
+        for (int i=0; i < modeObject->dmaBuffer->length(); i++)
+        {
+            fftIn[i] = modeObject->dmaBuffer->getFromNextPartitionAsFloat(i) - avg;
+        }
 
         // begin sampling
         sampleAdc(modeObject);
@@ -388,7 +393,7 @@ void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObj
         }
 
         // Calculate the brightness of each pixel
-        for (int i = 0; i < DMA_BUFFER_SIZE/2; i++)
+        for (int i = 0; i < (modeObject->dmaBuffer->length() / 2) + 1; i++)
         {
             // Get the affectted pixel
             pixel = modeObject->fftMultiplier * log(modeObject->dmaFrequencies[i] + 1 - MIN_FREQ);
@@ -425,10 +430,10 @@ void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObj
             toDisplay[(i * 3) + 0] = brightness * 0xFF;
             toDisplay[(i * 3) + 1] = brightness * 0xFF;
             toDisplay[(i * 3) + 2] = brightness * 0xFF;
-            //printf("%f,", pixelAmplitude[i]);
+            printf("%f,", pixelAmplitude[i]);
         }
-        //printf("\n");
-        printf("Max Frequency: %f\n", maxFreq);
+        printf("\n");
+        //printf("Max Frequency: %f\n", maxFreq);
 
         setLeds(ledStrip, toDisplay);
         ledStrip.show();

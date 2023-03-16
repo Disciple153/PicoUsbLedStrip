@@ -12,7 +12,6 @@ add_executable(deskdisplay
     writablearray.cpp
     debug.cpp
     fftData.cpp
-    kiss_fftr.cpp
 )
 add_library(kiss_fftr dependencies/kiss_fftr.c)
 add_library(kiss_fft dependencies/kiss_fft.c)
