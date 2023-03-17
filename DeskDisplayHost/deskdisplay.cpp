@@ -34,17 +34,19 @@
 #define FLASH_OFFSET 0x00100000u
 #define PI 3.14159265
 #define MAX_FREQ 5000
-#define MIN_FREQ 50
+#define MIN_FREQ 0
 #define AMP_CORRECTION_A 43
 #define AMP_CORRECTION_B 148
-#define PARTITION_LENGTH 0x100 // TODO  Make this as small as possible while still forcing a wait at `dma_channel_wait_for_finish_blocking()`
-#define PARTITION_COUNT 0x11 // TODO  Make this as large as desired for a balance of resolution and smoothing
+
+// PARTITION_LENGTH * (PARTITION_COUNT - 1) may not exceed 0x2000
+#define PARTITION_LENGTH 0x400 // TODO  Make this as small as possible while still forcing a wait at `dma_channel_wait_for_finish_blocking()`
+#define PARTITION_COUNT 0x9 // TODO  Make this as large as desired for a balance of resolution and smoothing
 
 // set this to determine sample rate
 // 96    = 500,000 Hz
 // 960   = 50,000 Hz
 // 9600  = 5,000 Hz
-#define CLOCK_DIV (96 * 100)
+#define CLOCK_DIV (96 * 400)
 #define FSAMP (48000000 / CLOCK_DIV)
 
 // Raspberry pi GPIO
@@ -81,7 +83,7 @@ struct ModeObject {
     uint dmaChannel;
     dma_channel_config dmaCfg;
     FftData* dmaBuffer;
-    float dmaFrequencies[PARTITION_LENGTH * PARTITION_COUNT];
+    float dmaFrequencies[((PARTITION_LENGTH * (PARTITION_COUNT - 1)) / 2) + 1];
     kiss_fftr_cfg fftConfig;
     float fftMultiplier;
 };
@@ -145,9 +147,9 @@ int main() {
     channel_config_set_dreq(&modeObject.dmaCfg, DREQ_ADC);
 
     // calculate frequencies of each bin
-    for (int i = 0; i < modeObject.dmaBuffer->length(); i++) 
+    for (int i = 0; i < (modeObject.dmaBuffer->length() / 2) + 1; i++) 
     {
-        modeObject.dmaFrequencies[i] = (FSAMP / modeObject.dmaBuffer->length()) * i;
+        modeObject.dmaFrequencies[i] = (((float) FSAMP) / modeObject.dmaBuffer->length()) * i;
     }
 
     modeObject.fftMultiplier = (float) (Constants::LED_STRIP_LENGTH - 1) / log(MAX_FREQ);
@@ -213,13 +215,13 @@ int main() {
         // Update the display
         displayModeUpdate(transmission.data, ledStrip, &modeObject, deltaTime_ms);
 
-        // // Heartbeat every second
-        // heartbeatTimer += deltaTime_ms;
-        // if (heartbeatTimer > 1000) {
-        //     gpio_put(STATUS_LED, statusLed);
-        //     statusLed = !statusLed;
-        //     heartbeatTimer = 0;
-        // }
+        // Heartbeat every second
+        heartbeatTimer += deltaTime_ms;
+        if (heartbeatTimer > 1000) {
+            gpio_put(STATUS_LED, statusLed);
+            statusLed = !statusLed;
+            heartbeatTimer = 0;
+        }
     }
 }
 
@@ -287,6 +289,14 @@ void displayModeInit(WritableArray* data, WS2812 ledStrip, ModeObject* modeObjec
     case (uint8_t) Constants::DisplayMode::SpectrumAnalyzer:
         // TODO adc_run(false) if not spectrumAnalyzer
         sampleAdc(modeObject);
+
+        while (modeObject->dmaBuffer->currentPartition < (modeObject->dmaBuffer->partitions - 1))
+        {
+            dma_channel_wait_for_finish_blocking(modeObject->dmaChannel);
+            sampleAdc(modeObject);
+            modeObject->dmaBuffer->average();
+        } 
+
         break;
     
     default:
@@ -314,15 +324,19 @@ void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObj
     
     float pixelAmplitude[Constants::LED_STRIP_LENGTH];
     float pixelFreq[Constants::LED_STRIP_LENGTH]; // TODO delete
+    float reals[Constants::LED_STRIP_LENGTH]; // TODO delete
+    float imaginaries[Constants::LED_STRIP_LENGTH]; // TODO delete
     uint8_t toDisplay[Constants::DATA_LENGTH];
     
-    uint64_t sum = 0;
     float avg;
     float amplitude;
     float maxAmplitude = 0;
     float maxFreq = 0;
     float brightness;
     int pixel = 0;
+    int index;
+    uint32_t startWaitTimeUs;
+    uint32_t endWaitTimeUs;
 
     // Display based on displaymode
     switch (displayMode)
@@ -353,27 +367,37 @@ void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObj
         break;
 
     case (uint8_t) Constants::DisplayMode::SpectrumAnalyzer:
-        // Wait to finish sampling
+        // Wait to finish sampling, and begin sampling next partition
         // TODO time this with and without a sleep before to find how many ns this should take with no waiting.
+
+        startWaitTimeUs = time_us_32();
         dma_channel_wait_for_finish_blocking(modeObject->dmaChannel);
-        gpio_put(STATUS_LED, 0);
-
-        for (int i=0; i < modeObject->dmaBuffer->length(); i++)
-        {
-            sum += modeObject->dmaBuffer->getFromNextPartitionAsFloat(i);
-        }
-        avg = (float)sum / modeObject->dmaBuffer->length();
-        for (int i=0; i < modeObject->dmaBuffer->length(); i++)
-        {
-            fftIn[i] = modeObject->dmaBuffer->getFromNextPartitionAsFloat(i) - avg;
-        }
-
-        // begin sampling
-        sampleAdc(modeObject);
-        gpio_put(STATUS_LED, 1);
+        endWaitTimeUs = time_us_32();
+        //printf("dma_channel_wait_for_finish_blocking: %u us\n", endWaitTimeUs - startWaitTimeUs);
+        startWaitTimeUs = time_us_32();
         
+        sampleAdc(modeObject);
+
+        // Prepare fft  buffer
+        avg = modeObject->dmaBuffer->average();
+
+        index = modeObject->dmaBuffer->endIndexA();
+        for (int i = 0; i < modeObject->dmaBuffer->endIndexA(); i++)
+            fftIn[i] = ((float)modeObject->dmaBuffer->data[i]) - avg;
+        for (int i = modeObject->dmaBuffer->beginIndexB(); i < modeObject->dmaBuffer->rawLength(); i++)
+            fftIn[index++] = ((float)modeObject->dmaBuffer->data[i]) - avg;
+
         // compute fft
         kiss_fftr(modeObject->fftConfig, fftIn, fftOut);
+
+        // if (stdio_usb_connected())
+        // {
+        //     for (int i = 0; i < (modeObject->dmaBuffer)->length(); i++)
+        //     {
+        //         printf("%.1f ", fftIn[i]);
+        //     }
+        //     while(true);
+        // }
 
         // pixel = modeObject->fftMultiplier * log(modeObject->dmaFrequencies[max_idx] + 1 - MIN_FREQ);
         // if (pixel < 0) pixel = 0;
@@ -390,6 +414,8 @@ void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObj
         {
             pixelAmplitude[i] = 0;
             pixelFreq[i] = 0;
+            reals[i] = 0;
+            imaginaries[i] = 0;
         }
 
         // Calculate the brightness of each pixel
@@ -399,8 +425,8 @@ void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObj
             pixel = modeObject->fftMultiplier * log(modeObject->dmaFrequencies[i] + 1 - MIN_FREQ);
 
             // Get the amplitude of the data relative to the frequency
-            amplitude = (fftOut[i].r * fftOut[i].r + fftOut[i].i * fftOut[i].i) /
-                ((AMP_CORRECTION_A * log(modeObject->dmaFrequencies[i])) - AMP_CORRECTION_B);
+            amplitude = (fftOut[i].r * fftOut[i].r + fftOut[i].i * fftOut[i].i);// /
+                //((AMP_CORRECTION_A * log(modeObject->dmaFrequencies[i])) - AMP_CORRECTION_B);
 
             // Store the value of the most significant frequency
             if (0 < pixel && pixel < Constants::LED_STRIP_LENGTH &&
@@ -408,6 +434,8 @@ void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObj
             {
                 pixelAmplitude[pixel] = amplitude;
                 pixelFreq[pixel] = modeObject->dmaFrequencies[i];
+                reals[pixel] = fftOut[i].r;
+                imaginaries[pixel] = fftOut[i].i;
 
                 if (amplitude > maxAmplitude)
                 {
@@ -417,6 +445,7 @@ void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObj
             }
         }
 
+        // printf("frequencies: ");
         // for (int i = 0; i < Constants::LED_STRIP_LENGTH; i++ )
         // {
         //     printf("%f,", pixelFreq[i]);
@@ -430,13 +459,16 @@ void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObj
             toDisplay[(i * 3) + 0] = brightness * 0xFF;
             toDisplay[(i * 3) + 1] = brightness * 0xFF;
             toDisplay[(i * 3) + 2] = brightness * 0xFF;
-            printf("%f,", pixelAmplitude[i]);
+            //printf("%.2f %.2f %.2f %.2f\n", pixelFreq[i], pixelAmplitude[i], reals[i], imaginaries[i]);
         }
-        printf("\n");
-        //printf("Max Frequency: %f\n", maxFreq);
+        // printf("\n");
+        printf("Max Frequency: %f\n", maxFreq);
 
         setLeds(ledStrip, toDisplay);
         ledStrip.show();
+
+        endWaitTimeUs = time_us_32();
+        //printf("FFT time: %u us\n", endWaitTimeUs - startWaitTimeUs);
 
         break;
 

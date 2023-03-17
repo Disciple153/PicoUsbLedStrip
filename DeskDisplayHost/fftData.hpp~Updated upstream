@@ -7,29 +7,26 @@
 class FftData
 {
     private:
-        uint32_t* sums;
-        
-        void calculateLastSum();
-
-    public:
         uint8_t* data;
 
+    public:
         size_t partitionLength;
         size_t partitions;
+<<<<<<< Updated upstream:DeskDisplayHost/fftData.hpp
         size_t currentPartition;
+=======
+        size_t workingPartition;
+>>>>>>> Stashed changes:DeskDisplayHost/dependencies/custom_kiss_fft/fftData.hpp
 
         FftData(size_t partitionLength, size_t partitions);
         ~FftData();
 
         uint8_t* getPartition(size_t partition);
         uint8_t* getNextPartition();
-        float average();
-        size_t endIndexA();
-        size_t beginIndexB();
         size_t rawLength();
         size_t length();
-        uint8_t getFromPartition(size_t partition, size_t index);
-        uint8_t getFromNextPartition(size_t index);
+        float getFromPartitionAsFloat(size_t partition, size_t index);
+        float getFromNextPartitionAsFloat(size_t index);
 
 };
 
