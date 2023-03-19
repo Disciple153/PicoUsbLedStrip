@@ -30,12 +30,59 @@ class DeskDisplay
                 throw new Exception("DeskDisplay not found.");
             }
 
-            Constants.DisplayMode displayMode = Constants.DisplayMode.Scroll;
+            Constants.DisplayMode displayMode = Constants.DisplayMode.SpectrumAnalyzer;
             Color color1 = Color.FromArgb(0x80, 0x00, 0xFF);
             Color color2 = Color.FromArgb(0x00, 0xFF, 0x00);
 
+            Color[] evaColors = 
+            {
+                color1,
+                color1,
+                color2,
+                color2
+            };
+
+            Color[] rainbow = {
+                Color.FromArgb(0xFF, 0x00, 0x00),
+                Color.FromArgb(0xFF, 0xFF, 0x00),
+                Color.FromArgb(0x00, 0xFF, 0x00),
+                Color.FromArgb(0x00, 0xFF, 0xFF),
+                Color.FromArgb(0x00, 0x00, 0xFF),
+                Color.FromArgb(0xFF, 0x00, 0xFF),
+            };
+
+            Color[] landon =
+            {
+                Color.Red,
+                Color.Red,
+                Color.Yellow,
+                Color.Yellow,
+                Color.Purple,
+                Color.Purple
+            };
+
             switch (displayMode)
             {
+                case Constants.DisplayMode.SpectrumAnalyzer:
+                    loopTime = 0x8000;
+
+                    leds = new List<byte>
+                    {
+                        (byte)displayMode,
+                        (byte)loopTime, // Pulse Speed Low
+                        (byte)(loopTime >> 8), // Pulse Speed High
+                    };
+
+                    foreach (Color color in fadeThroughColors(Constants.LED_STRIP_LENGTH, evaColors))
+                    {
+                        leds.Add(color.R);
+                        leds.Add(color.G);
+                        leds.Add(color.B);
+                    }
+
+                    result = WriteToSerialPort(serialPort, leds);
+                    break;
+
                 case Constants.DisplayMode.Solid:
                     leds = new List<byte>
                     {
@@ -83,18 +130,12 @@ class DeskDisplay
                         (byte)(loopTime >> 8), // Pulse Speed High
                     };
 
-                    for (int i = 0; i < Constants.LED_STRIP_LENGTH / 2; i++)
-                    {
-                        leds.Add(color1.R);
-                        leds.Add(color1.G);
-                        leds.Add(color1.B);
-                    }
 
-                    for (int i = Constants.LED_STRIP_LENGTH / 2; i < Constants.LED_STRIP_LENGTH; i++)
+                    foreach (Color color in fadeThroughColors(Constants.LED_STRIP_LENGTH, evaColors))
                     {
-                        leds.Add(color2.R);
-                        leds.Add(color2.G);
-                        leds.Add(color2.B);
+                        leds.Add(color.R);
+                        leds.Add(color.G);
+                        leds.Add(color.B);
                     }
 
                     result = WriteToSerialPort(serialPort, leds);
@@ -155,6 +196,77 @@ class DeskDisplay
                 serialPort.Close();
             }
         }
+    }
+
+    private static Color[] fadeThroughColors(int resolution, Color[] colors)
+    {
+        Color[] fade = new Color[resolution];
+        Color color1;
+        Color color2;
+        float brightness;
+        int colorIndex;
+
+        for (int i = 0; i < resolution; i++)
+        {
+            brightness = (i % ((float)resolution / colors.Length)) / (resolution / colors.Length);
+            colorIndex = (i * colors.Length) / resolution;
+            color1 = colors[colorIndex];
+
+            colorIndex++;
+
+            if (colorIndex >= colors.Length)
+            {
+                colorIndex = 0;
+            }
+
+            color2 = colors[colorIndex];
+
+            fade[i] = Color.FromArgb(
+                (byte)((color1.R * (1 - brightness)) + (color2.R * brightness)),
+                (byte)((color1.G * (1 - brightness)) + (color2.G * brightness)),
+                (byte)((color1.B * (1 - brightness)) + (color2.B * brightness))
+            );
+        }
+
+        return fade;
+    }
+
+    private static Color[] fadeThroughColorsCos(int resolution, Color[] colors)
+    {
+        Color[] fade = new Color[resolution];
+        Color color1;
+        Color color2;
+        float brightness;
+        int colorIndex;
+
+        for (int i = 0; i < resolution; i++)
+        {
+            brightness = (i % ((float)resolution / colors.Length)) / (resolution / colors.Length);
+            colorIndex = (i * colors.Length) / resolution;
+            color1 = colors[colorIndex];
+
+            colorIndex++;
+
+            if (colorIndex >= colors.Length)
+            {
+                colorIndex = 0;
+            }
+
+            color2 = colors[colorIndex];
+
+            fade[i] = Color.FromArgb(
+                (byte)((color1.R * (1 - ((Math.Cos(Math.PI * brightness) + 1) / -2))) 
+                     + (color2.R * (     (Math.Cos(Math.PI * brightness) + 1) / -2))),
+
+                (byte)((color1.G * (1 - ((Math.Cos(Math.PI * brightness) + 1) / -2))) 
+                     + (color2.G * (     (Math.Cos(Math.PI * brightness) + 1) / -2))),
+
+                (byte)((color1.B * (1 - ((Math.Cos(Math.PI * brightness) + 1) / -2))) 
+                     + (color2.B * (     (Math.Cos(Math.PI * brightness) + 1) / -2)))
+            );
+        }
+
+        return fade;
     }
 
     private static string WriteToSerialPort(SerialPort serialPort, IEnumerable<byte> payload)

@@ -19,6 +19,7 @@ public static class Constants
         Pulse,
         Stream,
         Fade,
-        Scroll
+        Scroll,
+        SpectrumAnalyzer
     };
 }

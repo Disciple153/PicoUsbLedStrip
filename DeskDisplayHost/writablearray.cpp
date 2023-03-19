@@ -11,7 +11,6 @@ WritableArray::WritableArray(size_t length)
 {
     rawLength = ((length + FLASH_PAGE_SIZE + 1) / FLASH_PAGE_SIZE) * FLASH_PAGE_SIZE;
 
-    //data = (uint8_t*) malloc(rawLength);
     data = new uint8_t[rawLength];
 
     data[0] = length;
@@ -20,7 +19,6 @@ WritableArray::WritableArray(size_t length)
 
 WritableArray::~WritableArray()
 {
-    //free(data);
     delete[] data;
 }
 
