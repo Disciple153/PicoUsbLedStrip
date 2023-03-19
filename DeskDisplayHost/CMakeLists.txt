@@ -30,6 +30,7 @@ pico_add_extra_outputs(deskdisplay)
 
 target_link_libraries(deskdisplay
     pico_stdlib
+    pico_multicore
     hardware_pio
     hardware_adc
     hardware_dma

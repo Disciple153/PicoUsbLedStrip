@@ -30,7 +30,7 @@ class DeskDisplay
                 throw new Exception("DeskDisplay not found.");
             }
 
-            Constants.DisplayMode displayMode = Constants.DisplayMode.Scroll;
+            Constants.DisplayMode displayMode = Constants.DisplayMode.SpectrumAnalyzer;
             Color color1 = Color.FromArgb(0x80, 0x00, 0xFF);
             Color color2 = Color.FromArgb(0x00, 0xFF, 0x00);
 
@@ -64,12 +64,16 @@ class DeskDisplay
             switch (displayMode)
             {
                 case Constants.DisplayMode.SpectrumAnalyzer:
+                    loopTime = 0x8000;
+
                     leds = new List<byte>
                     {
-                        (byte)displayMode
+                        (byte)displayMode,
+                        (byte)loopTime, // Pulse Speed Low
+                        (byte)(loopTime >> 8), // Pulse Speed High
                     };
 
-                    foreach (Color color in fadeThroughColors(Constants.LED_STRIP_LENGTH, rainbow))
+                    foreach (Color color in fadeThroughColors(Constants.LED_STRIP_LENGTH, evaColors))
                     {
                         leds.Add(color.R);
                         leds.Add(color.G);
