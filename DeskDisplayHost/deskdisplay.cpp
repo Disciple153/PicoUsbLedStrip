@@ -117,6 +117,9 @@ uint8_t getSubPixel(uint8_t* data, uint16_t index, size_t length, uint8_t colorC
 void sampleAdc(ModeObject* modeObject);
 void displayModeInit(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject);
 void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject, uint8_t deltaTime);
+void spectrumAnalyzerInit(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject);
+void spectrumAnalyzerUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject, uint8_t deltaTime);
+
 void displayload(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject);
 TransmissionState transmissionStateMachine(TransmissionState state, Transmission* transmission, uint32_t deltaTime_ms);
 void spectrumAnalyzerUpdateLeds();
@@ -417,22 +420,7 @@ void displayModeInit(WritableArray* data, WS2812 ledStrip, ModeObject* modeObjec
         break;
 
     case (uint8_t) Constants::DisplayMode::SpectrumAnalyzer:
-        sampleAdc(modeObject);
-
-        while (modeObject->dmaBuffer->currentPartition < (modeObject->dmaBuffer->partitions - 1))
-        {
-            dma_channel_wait_for_finish_blocking(modeObject->dmaChannel);
-            sampleAdc(modeObject);
-            modeObject->dmaBuffer->average();
-        }
-
-        multicore_launch_core1(spectrumAnalyzerUpdateLeds);
-        modeObject->threadRunning = true;
-
-        multicore_fifo_push_blocking((uint32_t) ((uint16_t) (*data)[1] | ((uint16_t) (*data)[2] << 8))); // looptime
-        for (int i = 0; i < Constants::DATA_LENGTH; i++)
-            multicore_fifo_push_blocking((*data)[3 + i]);
-
+        spectrumAnalyzerInit(data, ledStrip, modeObject);
         break;
     
     default:
@@ -463,17 +451,6 @@ void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObj
 {
     Constants::DisplayMode displayMode = (Constants::DisplayMode) (*data)[0];
     uint16_t loopTime;
-    kiss_fft_scalar fftIn[modeObject->dmaBuffer->length()];
-    kiss_fft_cpx fftOut[(modeObject->dmaBuffer->length() / 2) + 1];
-    
-    float pixelAmplitude[Constants::LED_STRIP_LENGTH];
-    
-    float avg;
-    float amplitude;
-    float maxAmplitude;
-    int_float brightness;
-    int pixel = 0;
-    int index;
 
     // Display based on displaymode
     switch (displayMode)
@@ -505,56 +482,7 @@ void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObj
         break;
 
     case (uint8_t) Constants::DisplayMode::SpectrumAnalyzer:
-        // Wait to finish sampling, and begin sampling next partition
-        dma_channel_wait_for_finish_blocking(modeObject->dmaChannel);
-        sampleAdc(modeObject);
-
-        // Prepare fft  buffer
-        avg = modeObject->dmaBuffer->average();
-        index = modeObject->dmaBuffer->endIndexA();
-        for (int i = 0; i < modeObject->dmaBuffer->endIndexA(); i++)
-            fftIn[i] = ((float)modeObject->dmaBuffer->data[i]) - avg;
-        for (int i = modeObject->dmaBuffer->beginIndexB(); i < modeObject->dmaBuffer->rawLength(); i++)
-            fftIn[index++] = ((float)modeObject->dmaBuffer->data[i]) - avg;
-
-        // compute fft
-        kiss_fftr(modeObject->fftConfig, fftIn, fftOut);
-
-        // Zero out all values
-        for (int i = 0; i < Constants::LED_STRIP_LENGTH; i++)
-            pixelAmplitude[i] = 0;
-
-        // Calculate the brightness of each pixel
-        for (int i = 0; i < (modeObject->dmaBuffer->length() / 2) + 1; i++)
-        {
-            // Get the affectted pixel
-            pixel = modeObject->fftMultiplier * log2(modeObject->dmaFrequencies[i] / MIN_FREQ);
-
-            // Get the amplitude of the data relative to the frequency
-            amplitude = fftOut[i].r * fftOut[i].r + fftOut[i].i * fftOut[i].i;
-
-            // Store the value of the most significant frequency
-            if (0 <= pixel && pixel < Constants::LED_STRIP_LENGTH &&
-                amplitude > pixelAmplitude[pixel])
-            {
-                pixelAmplitude[pixel] = amplitude;
-
-                if (amplitude > maxAmplitude)
-                {
-                    maxAmplitude = amplitude;
-                }
-            }
-        }
-
-        // Apply brightness data to pixels
-        for (int i = 0; i < Constants::LED_STRIP_LENGTH; i++ )
-        {
-            brightness.f = (((1 - MIN_BRIGHTNESS) * (pixelAmplitude[i] / maxAmplitude)) + MIN_BRIGHTNESS) * BRIGHTNESS_MULTIPLIER;
-            if (brightness.f > 1) brightness.f = 1;
-
-            multicore_fifo_push_blocking(brightness.i);
-        }
-
+        spectrumAnalyzerUpdate(data, ledStrip, modeObject, deltaTime);
         break;
 
     default:
@@ -567,6 +495,109 @@ void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObj
         }
         ledStrip.show();
         break;
+    }
+}
+
+/**
+ * @brief Initializes the spectrum analyzer display mode.
+ * 
+ * @param data The data to be displayed.
+ * @param ledStrip The led strip on which to display.
+ * @param modeObject The ModeObject containing state data for the spectrum analyzer.
+ */
+void spectrumAnalyzerInit(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject)
+{
+    // Begin sampling the ADC
+    sampleAdc(modeObject);
+
+    // Fill the DMA buffer with data before displaying.
+    while (modeObject->dmaBuffer->currentPartition < (modeObject->dmaBuffer->partitions - 1))
+    {
+        dma_channel_wait_for_finish_blocking(modeObject->dmaChannel);
+        sampleAdc(modeObject);
+        modeObject->dmaBuffer->average();
+    }
+
+    // Launch the smoothing thread.
+    multicore_launch_core1(spectrumAnalyzerUpdateLeds);
+    modeObject->threadRunning = true;
+
+    // Send color data to the smoothing thread.
+    multicore_fifo_push_blocking((uint32_t) ((uint16_t) (*data)[1] | ((uint16_t) (*data)[2] << 8))); // looptime
+    for (int i = 0; i < Constants::DATA_LENGTH; i++)
+        multicore_fifo_push_blocking((*data)[3 + i]);
+}
+
+/**
+ * @brief Initializes the spectrum analyzer display mode.
+ * 
+ * @param data The data to be displayed.
+ * @param ledStrip The led strip on which to display.
+ * @param modeObject The ModeObject containing state data for the spectrum analyzer.
+ * @param deltaTime The time since the last time this method was called.
+ */
+void spectrumAnalyzerUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject, uint8_t deltaTime)
+{
+    kiss_fft_scalar fftIn[modeObject->dmaBuffer->length()];
+    kiss_fft_cpx fftOut[(modeObject->dmaBuffer->length() / 2) + 1];
+    
+    float pixelAmplitude[Constants::LED_STRIP_LENGTH];
+    
+    float avg;
+    float amplitude;
+    float maxAmplitude;
+    int_float brightness;
+    int pixel = 0;
+    int index;
+
+    // Wait to finish sampling, and begin sampling next partition
+    dma_channel_wait_for_finish_blocking(modeObject->dmaChannel);
+    sampleAdc(modeObject);
+
+    // Prepare fft  buffer
+    avg = modeObject->dmaBuffer->average();
+    index = modeObject->dmaBuffer->endIndexA();
+    for (int i = 0; i < modeObject->dmaBuffer->endIndexA(); i++)
+        fftIn[i] = ((float)modeObject->dmaBuffer->data[i]) - avg;
+    for (int i = modeObject->dmaBuffer->beginIndexB(); i < modeObject->dmaBuffer->rawLength(); i++)
+        fftIn[index++] = ((float)modeObject->dmaBuffer->data[i]) - avg;
+
+    // compute fft
+    kiss_fftr(modeObject->fftConfig, fftIn, fftOut);
+
+    // Zero out all values
+    for (int i = 0; i < Constants::LED_STRIP_LENGTH; i++)
+        pixelAmplitude[i] = 0;
+
+    // Calculate the brightness of each pixel
+    for (int i = 0; i < (modeObject->dmaBuffer->length() / 2) + 1; i++)
+    {
+        // Get the affectted pixel
+        pixel = modeObject->fftMultiplier * log2(modeObject->dmaFrequencies[i] / MIN_FREQ);
+
+        // Get the amplitude of the data relative to the frequency
+        amplitude = fftOut[i].r * fftOut[i].r + fftOut[i].i * fftOut[i].i;
+
+        // Store the value of the most significant frequency
+        if (0 <= pixel && pixel < Constants::LED_STRIP_LENGTH &&
+            amplitude > pixelAmplitude[pixel])
+        {
+            pixelAmplitude[pixel] = amplitude;
+
+            if (amplitude > maxAmplitude)
+            {
+                maxAmplitude = amplitude;
+            }
+        }
+    }
+
+    // Apply brightness data to pixels
+    for (int i = 0; i < Constants::LED_STRIP_LENGTH; i++ )
+    {
+        brightness.f = (((1 - MIN_BRIGHTNESS) * (pixelAmplitude[i] / maxAmplitude)) + MIN_BRIGHTNESS) * BRIGHTNESS_MULTIPLIER;
+        if (brightness.f > 1) brightness.f = 1;
+
+        multicore_fifo_push_blocking(brightness.i);
     }
 }
 
