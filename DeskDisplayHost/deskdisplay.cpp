@@ -370,7 +370,6 @@ uint8_t getSubPixel(uint8_t* data, uint16_t pixelIndex, size_t length, uint8_t c
  */
 void sampleAdc(ModeObject* modeObject)
 {
-    // begin sampling
     adc_fifo_drain();
     adc_run(false);
 
@@ -388,7 +387,7 @@ void sampleAdc(ModeObject* modeObject)
  * @brief Initializes a DisplayMode based on the first value in the data array.
  * 
  * @param data The WritableArray containing the display data.
- * @param ledStrip The led Strip on which to display.
+ * @param ledStrip The LED Strip on which to display.
  * @param modeObject The ModeObject containing state data for display modes.
  */
 void displayModeInit(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject)
@@ -424,6 +423,7 @@ void displayModeInit(WritableArray* data, WS2812 ledStrip, ModeObject* modeObjec
         break;
     
     default:
+        // Show the display mode as a red error code if it is not covered in any case.
         ledStrip.fill(WS2812::RGB(0x00, 0x00, 0x00));
         for (int i = 0; i < 8; i++)
         {
@@ -443,7 +443,7 @@ void displayModeInit(WritableArray* data, WS2812 ledStrip, ModeObject* modeObjec
  * @brief Updates a DisplayMode based on the first value in the data array.
  * 
  * @param data The WritableArray containing the display data.
- * @param ledStrip The led Strip on which to display.
+ * @param ledStrip The LED Strip on which to display.
  * @param modeObject The ModeObject containing state data for display modes.
  * @param deltaTime The time since the last time this method was called.
  */
@@ -460,6 +460,7 @@ void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObj
         sleep_ms(1); // DO NOT REMOVE ¯\_(ツ)_/¯
         break;
     case (uint8_t) Constants::DisplayMode::Pulse:
+        // Change the brightness over time
         loopTime = (uint16_t) (*data)[1] | (uint16_t) (*data)[2] << 8;
 
         (*modeObject).timer += deltaTime;
@@ -471,6 +472,7 @@ void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObj
         break;
 
     case (uint8_t) Constants::DisplayMode::Scroll:
+        // Change the offset over time
         loopTime = (uint16_t) (*data)[1] | (uint16_t) (*data)[2] << 8;
 
         (*modeObject).timer += deltaTime;
@@ -486,6 +488,7 @@ void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObj
         break;
 
     default:
+        // Show the display mode as a green error code if it is not covered in any case.
         ledStrip.fill(WS2812::RGB(0x00, 0x00, 0x00));
         for (int i = 0; i < 8; i++)
         {
@@ -502,7 +505,7 @@ void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObj
  * @brief Initializes the spectrum analyzer display mode.
  * 
  * @param data The data to be displayed.
- * @param ledStrip The led strip on which to display.
+ * @param ledStrip The LED strip on which to display.
  * @param modeObject The ModeObject containing state data for the spectrum analyzer.
  */
 void spectrumAnalyzerInit(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject)
@@ -532,7 +535,7 @@ void spectrumAnalyzerInit(WritableArray* data, WS2812 ledStrip, ModeObject* mode
  * @brief Initializes the spectrum analyzer display mode.
  * 
  * @param data The data to be displayed.
- * @param ledStrip The led strip on which to display.
+ * @param ledStrip The LED strip on which to display.
  * @param modeObject The ModeObject containing state data for the spectrum analyzer.
  * @param deltaTime The time since the last time this method was called.
  */
@@ -565,20 +568,16 @@ void spectrumAnalyzerUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* mo
     // compute fft
     kiss_fftr(modeObject->fftConfig, fftIn, fftOut);
 
-    // Zero out all values
-    for (int i = 0; i < Constants::LED_STRIP_LENGTH; i++)
-        pixelAmplitude[i] = 0;
-
     // Calculate the brightness of each pixel
     for (int i = 0; i < (modeObject->dmaBuffer->length() / 2) + 1; i++)
     {
         // Get the affectted pixel
         pixel = modeObject->fftMultiplier * log2(modeObject->dmaFrequencies[i] / MIN_FREQ);
 
-        // Get the amplitude of the data relative to the frequency
+        // Get the amplitude of the data
         amplitude = fftOut[i].r * fftOut[i].r + fftOut[i].i * fftOut[i].i;
 
-        // Store the value of the most significant frequency
+        // Store the value of the most significant frequency per pixel and over all
         if (0 <= pixel && pixel < Constants::LED_STRIP_LENGTH &&
             amplitude > pixelAmplitude[pixel])
         {
@@ -591,7 +590,7 @@ void spectrumAnalyzerUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* mo
         }
     }
 
-    // Apply brightness data to pixels
+    // Send brightness data to smoothing thread to updatte the LEDs
     for (int i = 0; i < Constants::LED_STRIP_LENGTH; i++ )
     {
         brightness.f = (((1 - MIN_BRIGHTNESS) * (pixelAmplitude[i] / maxAmplitude)) + MIN_BRIGHTNESS) * BRIGHTNESS_MULTIPLIER;
@@ -614,7 +613,7 @@ void spectrumAnalyzerUpdateLeds()
 
     uint32_t prevTime, deltaTime, updateTime;
     uint32_t currentTime = time_us_32();
-    uint16_t loopTime = multicore_fifo_pop_blocking();
+    uint16_t loopTime = multicore_fifo_pop_blocking(); // Get looptime
     uint32_t timer = 0;
 
     float progress;
@@ -628,9 +627,11 @@ void spectrumAnalyzerUpdateLeds()
         WS2812::FORMAT_GRB
     );
 
+    // Get color data
     for (int i = 0; i < Constants::DATA_LENGTH; i++)
         data[i] = multicore_fifo_pop_blocking();
 
+    // Get first set of bightness data
     for (int i = 0; i < Constants::LED_STRIP_LENGTH; i++)
     {
         intFloat.i = multicore_fifo_pop_blocking();
@@ -638,16 +639,19 @@ void spectrumAnalyzerUpdateLeds()
         oldFftData[i] = intFloat.f;
     }
 
+    // Continuously update LED strip
     while (true)
     {
         currentTime = time_us_32();
 
-        // if there is data available
+        // If there is new brightness data available:
         if (multicore_fifo_rvalid())
         {
+            // Record the time since last update to determine fade speed.
             updateTime = currentTime - prevTime;
             prevTime = currentTime;
 
+            // Receive new brightness data
             for (int i = 0; i < Constants::LED_STRIP_LENGTH; i++)
             {
                 intFloat.i = multicore_fifo_pop_blocking();
@@ -656,16 +660,19 @@ void spectrumAnalyzerUpdateLeds()
             }
         }
 
+        // Calculate data for smoothing.
         deltaTime = currentTime - prevTime;
         progress = (float)deltaTime / updateTime;
         timer += (deltaTime / 1000);
         timer %= loopTime;
 
+        // Calculate this frame's brightness data.
         for (int i = 0; i < Constants::LED_STRIP_LENGTH; i++)
         {
             pixelBrightness[i] = ((oldFftData[i] * (1 - progress)) + (newFftData[i] * progress));
         }
 
+        // Update LEDs
         setLeds(ledStrip, &data[3], pixelBrightness, ((float)timer * Constants::LED_STRIP_LENGTH) / loopTime);
         ledStrip.show();
         sleep_ms(1);
