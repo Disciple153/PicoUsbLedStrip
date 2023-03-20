@@ -271,7 +271,7 @@ class DeskDisplay
 
     private static string WriteToSerialPort(SerialPort serialPort, IEnumerable<byte> payload)
     {
-
+        // TODO Implement Constants.SERIAL_PAGE_SIZE
         // Discard any garbage
         serialPort.DiscardInBuffer();
 

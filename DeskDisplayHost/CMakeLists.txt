@@ -10,7 +10,6 @@ add_executable(deskdisplay
     deskdisplay.cpp
     dependencies/WS2812.cpp
     writablearray.cpp
-    debug.cpp
     fftData.cpp
 )
 add_library(kiss_fftr dependencies/kiss_fftr.c)

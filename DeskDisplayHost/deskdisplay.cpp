@@ -6,7 +6,6 @@
 #include "dependencies/kiss_fftr.h"
 #include "writablearray.hpp"
 #include "fftData.hpp"
-#include "debug.hpp"
 #include <hardware/flash.h>
 #include <hardware/sync.h>
 #include <hardware/adc.h>
@@ -28,29 +27,29 @@
 #undef string
 #undef byte
 
-// #define INITIALIZATION
-
-#define LED_STRIP_PIN 0
-#define STATUS_LED 25
-#define FLASH_OFFSET 0x00100000u
+// General Constants
 #define PI 3.14159265
+
+// GPIO Pins
+#define LED_STRIP_PIN 0
+#define STATUS_LED_PIN 25
+#define ADC_FIRST_PIN 26
+#define ADC_PIN 0
+
+// Flash Memory
+#define FLASH_OFFSET 0x00100000u
+
+// Audio Spectrometer
 #define MAX_FREQ 3902
 #define MIN_FREQ 29
-#define AMP_CORRECTION_A 43
-#define AMP_CORRECTION_B 148
 #define MIN_BRIGHTNESS 0.01
 #define BRIGHTNESS_MULTIPLIER 10
-
-// PARTITION_LENGTH * (PARTITION_COUNT - 1) may not exceed 0x2000
-#define PARTITION_LENGTH 0x400 // TODO  Make this as small as possible while still forcing a wait at `dma_channel_wait_for_finish_blocking()`
-#define PARTITION_COUNT 0x5 // TODO  Make this as large as desired for a balance of resolution and smoothing
-
-// set this to determine sample rate
-// 96    = 500,000 Hz
-// 960   = 50,000 Hz
-// 9600  = 5,000 Hz
+#define AMP_CORRECTION_A 43
+#define AMP_CORRECTION_B 148
+#define PARTITION_LENGTH 0x400 // PARTITION_LENGTH * (PARTITION_COUNT - 1) may not exceed 0x2000
+#define PARTITION_COUNT 0x5    // PARTITION_LENGTH * (PARTITION_COUNT - 1) may not exceed 0x2000
 #define CLOCK_DIV (96 * 0x40)
-#define FSAMP (48000000 / CLOCK_DIV)
+#define SAMPLE_RATE (48000000 / CLOCK_DIV)
 
 // Raspberry pi GPIO
 /*
@@ -62,11 +61,17 @@ data    yellow  GP0
 
 */
 
+/**
+ * Allows ints to be stored as floats and vice versa.
+*/
 typedef union {
     uint32_t i;
     float f;
 } int_float;
 
+/**
+ * State enumerations for the transmission machine.
+*/
 enum TransmissionState : uint8_t {
     AwaitRequest,
     RespondRomId,
@@ -76,6 +81,9 @@ enum TransmissionState : uint8_t {
     RecieveHash
 };
 
+/**
+ * Structure to hold transmission machine data.
+*/
 struct Transmission {
     WritableArray* data = nullptr;
     size_t length = 0;
@@ -86,6 +94,9 @@ struct Transmission {
     bool read = false;
 };
 
+/**
+ * Structure to hold display mode state data.
+*/
 struct ModeObject {
     uint32_t timer;
     uint dmaChannel;
@@ -97,8 +108,8 @@ struct ModeObject {
     bool threadRunning = false;
 };
 
-const uint16_t DATA_SIZE = ((Constants::DATA_LENGTH + FLASH_SECTOR_SIZE - 1) / FLASH_SECTOR_SIZE) * FLASH_SECTOR_SIZE;
-
+// FUNCTION DECLARATIONS
+bool isFirstBoot();
 void setLeds(WS2812 ledStrip, uint8_t* data, uint8_t brightness, float offset);
 void setLeds(WS2812 ledStrip, uint8_t* data, float* brightness, float offset);
 uint8_t antiAlias(uint8_t* data, uint16_t index, size_t length, uint8_t colorComponent, float offset);
@@ -111,32 +122,25 @@ TransmissionState transmissionStateMachine(TransmissionState state, Transmission
 void spectrumAnalyzerUpdateLeds();
 
 int main() {
-    uint8_t debugIndex = 0;
-
     ModeObject modeObject;
     modeObject.dmaBuffer = new FftData(PARTITION_LENGTH, PARTITION_COUNT);
 
     TransmissionState transmissionState = TransmissionState::AwaitRequest;
-    TransmissionState maxTransmissionState = TransmissionState::AwaitRequest;
     Transmission transmission;
 
     bool statusLed = true;
-    int16_t b;
-    uint counter = 0;
-    uint i, j;
-    int16_t newDisplayMode;
     uint16_t heartbeatTimer = 0;
     uint32_t prevTime_us = time_us_32();
     uint32_t currentTimeTime_us = prevTime_us;
     uint32_t deltaTime_ms = 0;
 
-    stdio_init_all(); // Initialize usb
+    // INITIALIZE USB
+    stdio_init_all();
 
-    // ADC init
-    
-    adc_gpio_init(26 + 0);
+    // INITIALIZE ADC
+    adc_gpio_init(ADC_FIRST_PIN + ADC_PIN);
     adc_init();
-    adc_select_input(0);
+    adc_select_input(ADC_PIN);
     adc_fifo_setup(
 		 true,    // Write each completed conversion to the sample FIFO
 		 true,    // Enable DMA data request (DREQ)
@@ -146,6 +150,7 @@ int main() {
 	);
     adc_set_clkdiv(CLOCK_DIV);
     
+    // INITIALIZE DMA
     modeObject.dmaChannel = dma_claim_unused_channel(true);
     modeObject.dmaCfg = dma_channel_get_default_config(modeObject.dmaChannel);
     
@@ -157,26 +162,27 @@ int main() {
     // Pace transfers based on availability of ADC samples
     channel_config_set_dreq(&modeObject.dmaCfg, DREQ_ADC);
 
-    // calculate frequencies of each bin
+    // INITIALIZE FFT
+    // Calculate frequencies of FFT output array
     for (int i = 0; i < (modeObject.dmaBuffer->length() / 2) + 1; i++) 
     {
-        modeObject.dmaFrequencies[i] = (((float) FSAMP) / modeObject.dmaBuffer->length()) * i;
+        modeObject.dmaFrequencies[i] = (((float) SAMPLE_RATE) / modeObject.dmaBuffer->length()) * i;
     }
 
+    // Calculate constant to set the max displayed frequenct value
     modeObject.fftMultiplier = ((float) Constants::LED_STRIP_LENGTH - 1) / log2(MAX_FREQ / MIN_FREQ);
 
-    // FFT
     modeObject.fftConfig = kiss_fftr_alloc(modeObject.dmaBuffer->length(), false, 0, 0);
 
-    // Status LED init
-    gpio_init(STATUS_LED); // Initialize LED pin
-    gpio_set_dir(STATUS_LED, GPIO_OUT); // Set LED pin as output
+    // INITIALIZE STATUS LED
+    gpio_init(STATUS_LED_PIN);
+    gpio_set_dir(STATUS_LED_PIN, GPIO_OUT);
+    gpio_put(STATUS_LED_PIN, 1);
 
-    gpio_put(STATUS_LED, 1); // LED pin up (on)
-
+    // TODO maybe delete
     sleep_ms(500);
 
-    // Initialize LED strip
+    // INITIALIZE LED STRIP
     WS2812 ledStrip(
         LED_STRIP_PIN,
         Constants::LED_STRIP_LENGTH,
@@ -185,20 +191,21 @@ int main() {
         WS2812::FORMAT_GRB
     );
 
-    Debug::init(&ledStrip);
-
-#ifdef INITIALIZATION
-    transmission.data = new WritableArray(Constants::DATA_LENGTH + 1);
-    for (int i = 0; i < Constants::DATA_LENGTH + 3; i++)
+    // INITIALIZE PERSISTENT STORAGE
+    if (isFirstBoot())
     {
-        (*transmission.data)[i] = 0xFF;
-    }
-    (*transmission.data)[0] = Constants::DisplayMode::Solid;
+        // On first boot initialize LED strip to white.
+        transmission.data = new WritableArray(Constants::DATA_LENGTH + 1);
 
-    transmission.data->write((const uint8_t *) FLASH_OFFSET);
-    delete transmission.data;
-    transmission.data = nullptr;
-#endif
+        for (int i = 0; i < Constants::DATA_LENGTH + 3; i++)
+            (*transmission.data)[i] = 0xFF;
+
+        (*transmission.data)[0] = Constants::DisplayMode::Solid;
+
+        transmission.data->write((const uint8_t *) FLASH_OFFSET);
+        delete transmission.data;
+        transmission.data = nullptr;
+    }
 
     // Read data from flash
     transmission.data = WritableArray::read((const uint8_t *) FLASH_OFFSET);
@@ -240,13 +247,54 @@ int main() {
         // Heartbeat every second
         heartbeatTimer += deltaTime_ms;
         if (heartbeatTimer > 1000) {
-            gpio_put(STATUS_LED, statusLed);
+            gpio_put(STATUS_LED_PIN, statusLed);
             statusLed = !statusLed;
             heartbeatTimer = 0;
         }
     }
 }
 
+/**
+ * Checks whether this is the first boot by checking to see if the first page in
+ * flash of the sector before the FLASH_OFFSET contains a sequence of bytes.
+*/
+bool isFirstBoot()
+{
+    bool isFirstBoot = false;
+    int index = 0;
+    uint32_t interrupts;
+    uint8_t signature[FLASH_PAGE_SIZE];
+
+    while (index < FLASH_PAGE_SIZE && !isFirstBoot)
+    {
+        isFirstBoot = (uint8_t) index != ((const uint8_t*)XIP_BASE + FLASH_OFFSET - FLASH_SECTOR_SIZE)[index];
+        printf("%d ", ((const uint8_t*)XIP_BASE + FLASH_OFFSET - FLASH_SECTOR_SIZE)[index]);
+        index++;
+    }
+
+    if (isFirstBoot)
+    {
+        for (int i = 0; i < FLASH_PAGE_SIZE; i++)
+            signature[i] = i;
+
+        interrupts = save_and_disable_interrupts();
+        flash_range_erase((int)FLASH_OFFSET - FLASH_SECTOR_SIZE, FLASH_SECTOR_SIZE);
+        flash_range_program((int)FLASH_OFFSET - FLASH_SECTOR_SIZE, signature, FLASH_PAGE_SIZE);
+        restore_interrupts (interrupts);
+    }
+    
+    return isFirstBoot;
+}
+
+/**
+ * @brief Sets all LEDs in the LED strip based on the data array to a single
+ * brightness with an offset.
+ * 
+ * @param ledStrip The LED strip object.
+ * @param data An array of RGB values with a length equal to ledStrip.length * 3.
+ * @param brightness The brightness to set pixels to.
+ * @param offset The offest from data to actual pixel. Fractions will be anti-aliased.
+ */
 void setLeds(WS2812 ledStrip, uint8_t* data, uint8_t brightness = 0xff, float offset = 0)
 {
     float pixelBrightness[ledStrip.length];
@@ -259,6 +307,15 @@ void setLeds(WS2812 ledStrip, uint8_t* data, uint8_t brightness = 0xff, float of
     setLeds(ledStrip, data, pixelBrightness, offset);
 }
 
+/**
+ * @brief Sets all LEDs in the LED strip based on the data array to a per pixel
+ * brightness with an offset.
+ * 
+ * @param ledStrip The LED strip object.
+ * @param data An array of RGB values with a length equal to ledStrip.length * 3.
+ * @param brightness The brightness values of each pixel. (these values are not offset)
+ * @param offset The offest from data to actual pixel. Fractions will be anti-aliased.
+ */
 void setLeds(WS2812 ledStrip, uint8_t* data, float* brightness, float offset = 0)
 {
     for (uint16_t i = 0; i < ledStrip.length; i++)
@@ -273,18 +330,44 @@ void setLeds(WS2812 ledStrip, uint8_t* data, float* brightness, float offset = 0
     }
 }
 
-uint8_t antiAlias(uint8_t* data, uint16_t index, size_t length, uint8_t colorComponent, float offset)
+/**
+ * @brief Gets an anti-aliased subpixel based on a data array, pixelIndex,
+ * colorComponent, and offset.
+ * 
+ * @param data An array of RGB values with a length equal to ledStrip.length * 3.
+ * @param pixelIndex The pixel to be anti-aliased.
+ * @param length The number of pixels in the LED strip.
+ * @param colorComponent 0: Red. 1: Green. 2: Blue.
+ * @param offset The offset from data to actual pixel.
+ * @return uint8_t 
+ */
+uint8_t antiAlias(uint8_t* data, uint16_t pixelIndex, size_t length, uint8_t colorComponent, float offset)
 {
     float offsetDecimal = fmod(offset, 1);
-    return (getSubPixel(data, index, length, colorComponent, (int)floor(offset)) * (1 - offsetDecimal)) + 
-           (getSubPixel(data, index, length, colorComponent, (int) ceil(offset)) * offsetDecimal);
+    return (getSubPixel(data, pixelIndex, length, colorComponent, (int)floor(offset)) * (1 - offsetDecimal)) + 
+           (getSubPixel(data, pixelIndex, length, colorComponent, (int) ceil(offset)) * offsetDecimal);
 }
 
-uint8_t getSubPixel(uint8_t* data, uint16_t index, size_t length, uint8_t colorComponent, uint16_t offset)
+/**
+ * @brief Gets a subpixel from the data array
+ * 
+ * @param data An array of RGB values with a length equal to ledStrip.length * 3.
+ * @param pixelIndex The index of the pixel.
+ * @param length The number of pixels.
+ * @param colorComponent 0: Red. 1: Green. 2: Blue.
+ * @param offset The offset from data to actual pixel.
+ * @return uint8_t The value of the subpixel.
+ */
+uint8_t getSubPixel(uint8_t* data, uint16_t pixelIndex, size_t length, uint8_t colorComponent, uint16_t offset)
 {
-    return data[colorComponent + (3 * ((index + offset) % length))];
+    return data[colorComponent + (3 * ((pixelIndex + offset) % length))];
 }
 
+/**
+ * @brief Begins using the DMA to sample the ADC.
+ * 
+ * @param modeObject The ModeObject containing the dmaChannel, dmaConfig, and dmaBuffer.
+ */
 void sampleAdc(ModeObject* modeObject)
 {
     // begin sampling
@@ -301,6 +384,13 @@ void sampleAdc(ModeObject* modeObject)
     adc_run(true);
 }
 
+/**
+ * @brief Initializes a DisplayMode based on the first value in the data array.
+ * 
+ * @param data The WritableArray containing the display data.
+ * @param ledStrip The led Strip on which to display.
+ * @param modeObject The ModeObject containing state data for display modes.
+ */
 void displayModeInit(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject)
 {
     Constants::DisplayMode displayMode = (Constants::DisplayMode) (*data)[0];
@@ -356,6 +446,14 @@ void displayModeInit(WritableArray* data, WS2812 ledStrip, ModeObject* modeObjec
     if (displayMode != Constants::DisplayMode::Stream) data->write((const uint8_t *) FLASH_OFFSET);
 }
 
+/**
+ * @brief Updates a DisplayMode based on the first value in the data array.
+ * 
+ * @param data The WritableArray containing the display data.
+ * @param ledStrip The led Strip on which to display.
+ * @param modeObject The ModeObject containing state data for display modes.
+ * @param deltaTime The time since the last time this method was called.
+ */
 void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject, uint8_t deltaTime)
 {
     Constants::DisplayMode displayMode = (Constants::DisplayMode) (*data)[0];
@@ -469,6 +567,10 @@ void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObj
     }
 }
 
+/**
+ * @brief A subroutine used to smooth the data from audio spectru analysis.
+ * This method is to be run on the second thread while the displayMode is SpectrumAnalyzer.
+ */
 void spectrumAnalyzerUpdateLeds()
 {
     float oldFftData[Constants::LED_STRIP_LENGTH];
@@ -536,6 +638,14 @@ void spectrumAnalyzerUpdateLeds()
     }
 }
 
+/**
+ * @brief Handles the reception of data via USB.
+ * 
+ * @param state The current step in the transmission process.
+ * @param transmission An object to hold the data from a transmission.
+ * @param deltaTime_ms The time since the last time this method was called.
+ * @return TransmissionState The next step in the transmission process.
+ */
 TransmissionState transmissionStateMachine(TransmissionState state, Transmission* transmission, uint32_t deltaTime_ms)
 {
     uint32_t time = time_us_32();
