@@ -179,9 +179,6 @@ int main() {
     gpio_set_dir(STATUS_LED_PIN, GPIO_OUT);
     gpio_put(STATUS_LED_PIN, 1);
 
-    // TODO maybe delete
-    sleep_ms(500);
-
     // INITIALIZE LED STRIP
     WS2812 ledStrip(
         LED_STRIP_PIN,
@@ -400,18 +397,26 @@ void displayModeInit(WritableArray* data, WS2812 ledStrip, ModeObject* modeObjec
     {
     case (uint8_t) Constants::DisplayMode::Solid:
     case (uint8_t) Constants::DisplayMode::Stream:
-        setLeds(ledStrip, &(*data)[1]);
+        // Do not use setLeds here for speed purposes.
+        for (uint16_t i = 0; i < ledStrip.length; i++)
+        {
+            ledStrip.setPixelColor(i,
+                WS2812::RGB(
+                    (*data)[1 + (3 * i) + 0],
+                    (*data)[1 + (3 * i) + 1],
+                    (*data)[1 + (3 * i) + 2]
+                )
+            );
+        }
         ledStrip.show();
         break;
 
     case (uint8_t) Constants::DisplayMode::Pulse:
     case (uint8_t) Constants::DisplayMode::Scroll:
-        
         (*modeObject).timer = 0;
         break;
 
     case (uint8_t) Constants::DisplayMode::SpectrumAnalyzer:
-        // TODO adc_run(false) if not spectrumAnalyzer
         sampleAdc(modeObject);
 
         while (modeObject->dmaBuffer->currentPartition < (modeObject->dmaBuffer->partitions - 1))
@@ -485,7 +490,7 @@ void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObj
         
         setLeds(ledStrip, &(*data)[3], (0xFF * (cos((2 * PI * (*modeObject).timer) / loopTime) + 1)) / 2);
         ledStrip.show();
-        sleep_ms(10);
+        sleep_ms(1);
         break;
 
     case (uint8_t) Constants::DisplayMode::Scroll:
@@ -496,12 +501,11 @@ void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObj
         
         setLeds(ledStrip, &(*data)[3], 0xFF, ((float)(*modeObject).timer * Constants::LED_STRIP_LENGTH) / loopTime);
         ledStrip.show();
-        sleep_ms(10);
+        sleep_ms(1);
         break;
 
     case (uint8_t) Constants::DisplayMode::SpectrumAnalyzer:
         // Wait to finish sampling, and begin sampling next partition
-        // TODO time this with and without a sleep before to find how many ns this should take with no waiting.
         dma_channel_wait_for_finish_blocking(modeObject->dmaChannel);
         sampleAdc(modeObject);
 
@@ -527,8 +531,7 @@ void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObj
             pixel = modeObject->fftMultiplier * log2(modeObject->dmaFrequencies[i] / MIN_FREQ);
 
             // Get the amplitude of the data relative to the frequency
-            // TODO Divide by an amp correction equation
-            amplitude = (fftOut[i].r * fftOut[i].r + fftOut[i].i * fftOut[i].i);
+            amplitude = fftOut[i].r * fftOut[i].r + fftOut[i].i * fftOut[i].i;
 
             // Store the value of the most significant frequency
             if (0 <= pixel && pixel < Constants::LED_STRIP_LENGTH &&
@@ -634,7 +637,7 @@ void spectrumAnalyzerUpdateLeds()
 
         setLeds(ledStrip, &data[3], pixelBrightness, ((float)timer * Constants::LED_STRIP_LENGTH) / loopTime);
         ledStrip.show();
-        sleep_ms(5);
+        sleep_ms(1);
     }
 }
 
