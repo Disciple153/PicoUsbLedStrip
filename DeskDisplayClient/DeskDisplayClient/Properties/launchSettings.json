@@ -1,8 +1,0 @@
-{
-  "profiles": {
-    "DeskDisplayClient": {
-      "commandName": "Project",
-      "commandLineArgs": "scroll -c 8000FF,8000FF,green,green -l 0x3000"
-    }
-  }
-}
