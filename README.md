@@ -27,6 +27,21 @@ Put Pico into USB Mass Storage Mode by holding the BOOTSEL buttton while pluggin
 
 Paste deskdisplay.uf2 onto the Pico.
 
+Plug the Pico into your PC, and run DeskDisplayClient.exe.
+`DeskDisplayClient.exe [animation] -c [colors] -l [loopTime]`
+- animation
+    - Solid
+    - Stream
+    - Scroll
+    - Pulse
+    - Spectrum Analyzer
+- colors
+    - Comma seperated list of colors in text of hexadecimal format.
+- looptime
+    - The time in ms for one loop to be completed.
+    - must be between 0x0000 and 0xFFFF.
+
+
 ## Wiring Diagram
 ![Wiring diagram](images/PicoDeskDisplay.drawio.png)
 Connecting the TRS (aux) cable is optional, and will enable the Spectrum Analyzer function.

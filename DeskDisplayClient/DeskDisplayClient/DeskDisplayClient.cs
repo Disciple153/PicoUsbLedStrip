@@ -125,7 +125,7 @@ class DeskDisplay
             }
 
             // Add colors to payload
-            foreach (Color color in fadeThroughColors(200, colors.ToArray()))
+            foreach (Color color in fadeThroughColors(Constants.LED_STRIP_LENGTH, colors.ToArray()))
             {
                 payload.Add(color.R);
                 payload.Add(color.G);
@@ -293,24 +293,20 @@ class DeskDisplay
 
             // Get response
             response = serialPort.ReadTo("!\r\n");
-            Console.WriteLine(response);
 
             switch (response[response.Length - 1] + "!")
             {
                 // If Success, send next packet
                 case Constants.SUCCESS:
-                    Console.WriteLine("Success!");
                     index += Constants.SERIAL_PAGE_SIZE;
                     break;
 
                 // If Failure, resend packet
                 case Constants.FAILURE:
-                    Console.WriteLine("Failure");
                     break;
 
                 // If Timeout, retry from beginning
                 case Constants.TIMEOUT:
-                    Console.WriteLine("Timeout");
                     if (retries < MAX_RETRIES)
                         return WriteToSerialPort(serialPort, payload, retries + 1);
                     else
@@ -318,7 +314,6 @@ class DeskDisplay
 
                 // Otherwise, unknown transmission error.
                 default:
-                    Console.WriteLine("Error");
                     throw new Exception("Unknown transmission error");
             }
         }
