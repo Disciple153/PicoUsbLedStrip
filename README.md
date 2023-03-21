@@ -20,15 +20,15 @@ Install .NET. TODO finish the client program and include an exe.
 
 In Constants.cs, change `LED_STRIP_LENGTH` to the number of LEDs in your LED strip.
 
-- Navigate to DeskDisplayHost/build
+- Navigate to PicoUsbLedStripHost/build
 - Run `cmake .. && make`
 
 Put Pico into USB Mass Storage Mode by holding the BOOTSEL buttton while plugging it in.
 
-Paste deskdisplay.uf2 onto the Pico.
+Paste PicoUsbLedStrip.uf2 onto the Pico.
 
-Plug the Pico into your PC, and run DeskDisplayClient.exe.
-`DeskDisplayClient.exe [animation] -c [colors] -l [loopTime]`
+Plug the Pico into your PC, and run PicoUsbLedStripClient.exe.
+`PicoUsbLedStripClient.exe [animation] -c [colors] -l [loopTime]`
 - animation
     - Solid
     - Stream
@@ -43,5 +43,5 @@ Plug the Pico into your PC, and run DeskDisplayClient.exe.
 
 
 ## Wiring Diagram
-![Wiring diagram](images/PicoDeskDisplay.drawio.png)
+![Wiring diagram](images/PicoUsbLedStrip.drawio.png)
 Connecting the TRS (aux) cable is optional, and will enable the Spectrum Analyzer function.
