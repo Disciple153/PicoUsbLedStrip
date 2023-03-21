@@ -10,19 +10,62 @@ class DeskDisplay
 {
     const string VID = "2E8A";
     const string PID = "000A";
+    const int MAX_RETRIES = 5;
 
     static void Main(string[] args)
     {
+        Dictionary<string, Constants.DisplayMode> displayModes = new Dictionary<string, Constants.DisplayMode>();
+        Dictionary<string, string> parameters = new Dictionary<string, string>();
+        List<string> positionalArgs = new List<string>();
         SerialPort? serialPort = null;
-        List<byte> leds;
-        string result = "";
-        Stopwatch stopWatch;
+        List<byte> payload;
+        string result;
         ushort loopTime;
+        int index;
+
+        // Build Dcttionary mapping strings to DisplayModes
+        foreach (Constants.DisplayMode mode in Enum.GetValues<Constants.DisplayMode>())
+        {
+            displayModes.Add(mode.ToString().ToLower(), mode);
+        }
+
+        // Define available options
+        string[][] options = new string[][]
+        {
+            new string[] { "colors", "c" },
+            new string[] { "loop", "l" }
+        };
+
+        // Get all command line arguments
+        index = 0;
+        while (index < args.Length)
+        {
+            string arg = args[index++];
+
+            if (arg.StartsWith("-"))
+            {
+                string parameterName = getParameterName(arg, options);
+                if (parameterName != null) 
+                { 
+                   parameters.Add(parameterName, args[index++]);
+                }
+                else
+                {
+                    throw new Exception("Invalid option: " + arg);
+                }
+            }
+            else
+            {
+                positionalArgs.Add(arg);
+            }
+        }
 
         try
         {
             // Get the deskDisplay serialPort
             serialPort = GetSerialPort();
+
+            List<Color> colors = new List<Color>();
 
             // Make sure serialPort was successfully found
             if (serialPort == null || !serialPort.IsOpen)
@@ -30,144 +73,69 @@ class DeskDisplay
                 throw new Exception("DeskDisplay not found.");
             }
 
-            Constants.DisplayMode displayMode = Constants.DisplayMode.SpectrumAnalyzer;
-            Color color1 = Color.FromArgb(0x80, 0x00, 0xFF);
-            Color color2 = Color.FromArgb(0x00, 0xFF, 0x00);
+            // Get DisplayMode
+            Constants.DisplayMode displayMode = displayModes[positionalArgs[0].ToLower()];
 
-            Color[] evaColors = 
+            // Get colors
+            foreach (string color in parameters["colors"].Split(','))
             {
-                color1,
-                color1,
-                color2,
-                color2
-            };
+                if (char.IsDigit(color[0]))
+                {
+                    colors.Add(Color.FromArgb(Convert.ToInt32("00" + color, 16)));
+                }
+                else
+                {
+                    colors.Add(Color.FromName(color));
+                }
+            }
 
-            Color[] rainbow = {
-                Color.FromArgb(0xFF, 0x00, 0x00),
-                Color.FromArgb(0xFF, 0xFF, 0x00),
-                Color.FromArgb(0x00, 0xFF, 0x00),
-                Color.FromArgb(0x00, 0xFF, 0xFF),
-                Color.FromArgb(0x00, 0x00, 0xFF),
-                Color.FromArgb(0xFF, 0x00, 0xFF),
-            };
-
-            Color[] landon =
+            // Get loopTime
+            if (parameters["loop"].StartsWith("0x"))
             {
-                Color.Red,
-                Color.Red,
-                Color.Yellow,
-                Color.Yellow,
-                Color.Purple,
-                Color.Purple
-            };
+                loopTime = Convert.ToUInt16(parameters["loop"], 16);
+            }
+            else
+            {
+                loopTime = Convert.ToUInt16(parameters["loop"]);
+            }
 
+            // Add metadata to payload
             switch (displayMode)
             {
-                case Constants.DisplayMode.SpectrumAnalyzer:
-                    loopTime = 0x8000;
-
-                    leds = new List<byte>
-                    {
-                        (byte)displayMode,
-                        (byte)loopTime, // Pulse Speed Low
-                        (byte)(loopTime >> 8), // Pulse Speed High
-                    };
-
-                    foreach (Color color in fadeThroughColors(Constants.LED_STRIP_LENGTH, evaColors))
-                    {
-                        leds.Add(color.R);
-                        leds.Add(color.G);
-                        leds.Add(color.B);
-                    }
-
-                    result = WriteToSerialPort(serialPort, leds);
-                    break;
-
                 case Constants.DisplayMode.Solid:
-                    leds = new List<byte>
+                case Constants.DisplayMode.Stream:
+                    payload = new List<byte>
                     {
                         (byte)displayMode
                     };
-
-                    for (int i = 0; i < Constants.LED_STRIP_LENGTH; i++)
-                    {
-                        leds.Add(color1.R);
-                        leds.Add(color1.G);
-                        leds.Add(color1.B);
-                    }
-
-                    result = WriteToSerialPort(serialPort, leds);
                     break;
-
-                case Constants.DisplayMode.Pulse:
-                    loopTime = 0x1000;
-
-                    leds = new List<byte>
-                    {
-                        (byte)displayMode,
-                        (byte)loopTime, // Pulse Speed Low
-                        (byte)(loopTime >> 8), // Pulse Speed High
-                    };
-
-                    for (int i = 0; i < Constants.LED_STRIP_LENGTH; i++)
-                    {
-                        leds.Add(color1.R);
-                        leds.Add(color1.G);
-                        leds.Add(color1.B);
-                    }
-
-                    result = WriteToSerialPort(serialPort, leds);
-                    break;
-
-
                 case Constants.DisplayMode.Scroll:
-                    loopTime = 0x8000;
-
-                    leds = new List<byte>
+                case Constants.DisplayMode.Pulse:
+                case Constants.DisplayMode.SpectrumAnalyzer:
+                    payload = new List<byte>
                     {
                         (byte)displayMode,
                         (byte)loopTime, // Pulse Speed Low
                         (byte)(loopTime >> 8), // Pulse Speed High
                     };
-
-
-                    foreach (Color color in fadeThroughColors(Constants.LED_STRIP_LENGTH, evaColors))
-                    {
-                        leds.Add(color.R);
-                        leds.Add(color.G);
-                        leds.Add(color.B);
-                    }
-
-                    result = WriteToSerialPort(serialPort, leds);
                     break;
-
-                case Constants.DisplayMode.Stream:
-                    //https://stackoverflow.com/questions/1483928/how-to-read-the-color-of-a-screen-pixel
-                    stopWatch = new Stopwatch();
-                    stopWatch.Start();
-
-                    for (byte i = 0x00; i < 0xFF; i++)
-                    {
-                        leds = new List<byte>
-                        {
-                            (byte)Constants.DisplayMode.Stream
-                        };
-
-                        for (int j = 0; j < Constants.LED_STRIP_LENGTH; j++)
-                        {
-                            leds.Add((byte)(color1.R * ((float) i / 0xFF)));
-                            leds.Add((byte)(color1.G * ((float) i / 0xFF)));
-                            leds.Add((byte)(color1.B * ((float) i / 0xFF)));
-                        }
-
-                        result = WriteToSerialPort(serialPort, leds);
-                    }
-
-                    stopWatch.Stop();
-                    Console.WriteLine(1f / (stopWatch.Elapsed.TotalSeconds / 0xFF) + " FPS");
+                default:
+                    payload = new List<byte>();
                     break;
             }
 
+            // Add colors to payload
+            foreach (Color color in fadeThroughColors(200, colors.ToArray()))
+            {
+                payload.Add(color.R);
+                payload.Add(color.G);
+                payload.Add(color.B);
+            }
+
+            // Write data to Pico
+            result = WriteToSerialPort(serialPort, payload);
+
+            // Print result
             switch (result)
             {
                 case Constants.SUCCESS:
@@ -186,7 +154,6 @@ class DeskDisplay
                     Console.WriteLine("Error");
                     break;
             }
-
         }
         finally
         {
@@ -269,9 +236,15 @@ class DeskDisplay
         return fade;
     }
 
-    private static string WriteToSerialPort(SerialPort serialPort, IEnumerable<byte> payload)
+    private static string WriteToSerialPort(SerialPort serialPort, List<byte> payload, int retries = 0)
     {
-        // TODO Implement Constants.SERIAL_PAGE_SIZE
+        LinkedList<byte> rawPacket;
+        List<byte> packet;
+        int count, index;
+        byte hash;
+        string response = "E";
+        ushort length;
+
         // Discard any garbage
         serialPort.DiscardInBuffer();
 
@@ -281,32 +254,74 @@ class DeskDisplay
         // Receive ready response
         serialPort.ReadTo(Constants.ROM_ID + "\r\n");
 
-        // Build payload
-        LinkedList<byte> leds = new(payload);
-
-        // Prepend length
-        ushort length = (ushort) payload.Count();
-
-        leds.AddFirst((byte) (length >> 8));
-        leds.AddFirst((byte) length);
-
-        // Build hash
-        byte hash = 0;
-
-        foreach (byte b in leds)
+        index = 0;
+        while (index < payload.Count())
         {
-            hash += b;
+            // Extract a packet with a size <= Constants.SERIAL_PAGE_SIZE
+            if (index + Constants.SERIAL_PAGE_SIZE > payload.Count())
+                count = payload.Count() - index;
+            else
+                count = Constants.SERIAL_PAGE_SIZE;
+
+            packet = payload.GetRange(index, count);
+
+            // Build packet
+            rawPacket = new(packet);
+
+            // Build hash
+            hash = 0;
+
+            foreach (byte b in rawPacket)
+            {
+                hash += b;
+            }
+
+            // Append hash (length is not included)
+            rawPacket.AddLast(hash);
+
+            // If this is the first packet, prepend the total transmission length
+            if (index == 0)
+            {
+                length = (ushort)payload.Count();
+
+                rawPacket.AddFirst((byte)(length >> 8));
+                rawPacket.AddFirst((byte)length);
+            }
+
+            // Write packet
+            serialPort.Write(rawPacket.ToArray(), 0, rawPacket.Count);
+
+            // Get response
+            response = serialPort.ReadTo("!\r\n");
+            Console.WriteLine(response);
+
+            switch (response[response.Length - 1] + "!")
+            {
+                // If Success, send next packet
+                case Constants.SUCCESS:
+                    Console.WriteLine("Success!");
+                    index += Constants.SERIAL_PAGE_SIZE;
+                    break;
+
+                // If Failure, resend packet
+                case Constants.FAILURE:
+                    Console.WriteLine("Failure");
+                    break;
+
+                // If Timeout, retry from beginning
+                case Constants.TIMEOUT:
+                    Console.WriteLine("Timeout");
+                    if (retries < MAX_RETRIES)
+                        return WriteToSerialPort(serialPort, payload, retries + 1);
+                    else
+                        throw new Exception("Too many retries");
+
+                // Otherwise, unknown transmission error.
+                default:
+                    Console.WriteLine("Error");
+                    throw new Exception("Unknown transmission error");
+            }
         }
-
-        // Append hash
-        leds.AddLast(hash);
-
-        // Write payload
-        serialPort.Write(leds.ToArray(), 0, leds.Count);
-
-        // Get response
-        string response = serialPort.ReadTo("!\r\n");
-        //Console.WriteLine("Response: " + response);
 
         return response[response.Length - 1] + "!";
     }
@@ -395,5 +410,24 @@ class DeskDisplay
         }
 
         return serialPort;
+    }
+
+    private static string? getParameterName(string argument, string[][] options)
+    {
+        string? parameterName = null;
+        int index = 0;
+        argument = argument.TrimStart('-');
+
+        while (index < options.Length && parameterName == null)
+        {
+            string[] parameter = options[index++];
+
+            if (parameter.Contains(argument))
+            {
+                parameterName = parameter[0];
+            }
+        }
+
+        return parameterName;
     }
 }

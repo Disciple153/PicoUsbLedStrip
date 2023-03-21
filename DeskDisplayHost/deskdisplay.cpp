@@ -785,13 +785,6 @@ TransmissionState transmissionStateMachine(TransmissionState state, Transmission
                 {
                     transmission->last_tansmission_time_us = time;
 
-                    // Add the length to the hash
-                    temp8 = (*transmission->data).length();
-                    temp8 += (*transmission->data).length() >> 8;
-
-                    temp8 = (*transmission->data)[-1];
-                    temp8 += (*transmission->data)[-2];
-
                     // Add values from start of last page to end of received data.
                     for (int i = transmission->dataIndex - transmission->pageIndex; i < transmission->dataIndex; i++)
                     {
@@ -805,7 +798,7 @@ TransmissionState transmissionStateMachine(TransmissionState state, Transmission
                         if (transmission->dataIndex < transmission->length)
                         {
                             transmission->pageIndex = 0;
-                            state = TransmissionState::ReceiveTransmissionLengthLow;
+                            state = TransmissionState::ReceiveTransmission;
                             doNextStep = true;
                         }
                         else
