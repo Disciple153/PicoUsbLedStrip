@@ -6,7 +6,7 @@ using System.IO.Ports;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 
-class DeskDisplay
+class PicoUsbLedStripClient
 {
     const string VID = "2E8A";
     const string PID = "000A";
@@ -62,7 +62,7 @@ class DeskDisplay
 
         try
         {
-            // Get the deskDisplay serialPort
+            // Get the PicoUsbLedStripHost serialPort
             serialPort = GetSerialPort();
 
             List<Color> colors = new List<Color>();
@@ -70,7 +70,7 @@ class DeskDisplay
             // Make sure serialPort was successfully found
             if (serialPort == null || !serialPort.IsOpen)
             {
-                throw new Exception("DeskDisplay not found.");
+                throw new Exception("PicoUsbLedStripHost not found.");
             }
 
             // Get DisplayMode
