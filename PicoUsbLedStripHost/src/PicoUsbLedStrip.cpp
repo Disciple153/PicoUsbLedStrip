@@ -2,8 +2,8 @@
 #include "pico/stdlib.h"
 #include "pico/multicore.h"
 #include "hardware/gpio.h"
-#include "dependencies/WS2812.hpp"
-#include "dependencies/kiss_fftr.h"
+#include "../dependencies/WS2812.hpp"
+#include "../dependencies/kiss_fftr.h"
 #include "writablearray.hpp"
 #include "fftData.hpp"
 #include <hardware/flash.h>
@@ -19,7 +19,7 @@
 #define static
 #define string char*
 #define byte uint8_t
-#include "../Constants.cs"
+#include "../../Constants.cs"
 ;
 #undef class
 #undef public
@@ -374,7 +374,7 @@ void sampleAdc(ModeObject* modeObject)
     adc_run(false);
 
     dma_channel_configure(modeObject->dmaChannel, &modeObject->dmaCfg,
-        modeObject->dmaBuffer->getNextPartition(), // dst
+        &modeObject->dmaBuffer->getNextPartition(), // dst
         &adc_hw->fifo, // src
         modeObject->dmaBuffer->partitionLength, // transfer count
         true // start immediately

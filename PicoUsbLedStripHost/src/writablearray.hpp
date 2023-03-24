@@ -1,5 +1,4 @@
-#ifndef WRITABLEARRAY_H
-#define WRITABLEARRAY_H
+#pragma once
 
 #include <stdio.h>
 #include "pico/types.h"
@@ -21,4 +20,3 @@ class WritableArray
 };
 
 
-#endif /* WRITABLEARRAY_H */
