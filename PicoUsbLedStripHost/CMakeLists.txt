@@ -7,10 +7,10 @@ project(PicoUsbLedStrip)
 pico_sdk_init()
 
 add_executable(PicoUsbLedStrip 
-    PicoUsbLedStrip.cpp
+    src/PicoUsbLedStrip.cpp
     dependencies/WS2812.cpp
-    writablearray.cpp
-    fftData.cpp
+    src/writablearray.cpp
+    src/fftData.cpp
 )
 add_library(kiss_fftr dependencies/kiss_fftr.c)
 add_library(kiss_fft dependencies/kiss_fft.c)
