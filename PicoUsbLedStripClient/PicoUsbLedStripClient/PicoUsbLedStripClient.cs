@@ -5,6 +5,7 @@ using System.Drawing;
 using System.IO.Ports;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
+using System.Windows.Forms;
 
 class PicoUsbLedStripClient
 {
@@ -20,7 +21,7 @@ class PicoUsbLedStripClient
         SerialPort? serialPort = null;
         List<byte> payload;
         string result;
-        ushort loopTime;
+        ushort loopTime, numLeds;
         int index;
 
         // Build Dcttionary mapping strings to DisplayModes
@@ -33,7 +34,9 @@ class PicoUsbLedStripClient
         string[][] options = new string[][]
         {
             new string[] { "colors", "c" },
-            new string[] { "loop", "l" }
+            new string[] { "looptime", "l" },
+            new string[] { "help", "h" },
+            new string[] { "numleds", "n" }
         };
 
         // Get all command line arguments
@@ -47,7 +50,15 @@ class PicoUsbLedStripClient
                 string parameterName = getParameterName(arg, options);
                 if (parameterName != null) 
                 { 
-                   parameters.Add(parameterName, args[index++]);
+                    switch (parameterName.ToLower())
+                    {
+                        default:
+                            parameters.Add(parameterName.ToLower(), args[index++]);
+                            break;
+                        case ("help"):
+                            parameters.Add(parameterName.ToLower(), "");
+                            break;
+                    }
                 }
                 else
                 {
@@ -58,6 +69,28 @@ class PicoUsbLedStripClient
             {
                 positionalArgs.Add(arg);
             }
+        }
+
+        //GetScreenColors();
+
+        if (parameters.ContainsKey("help"))
+        {
+            Console.WriteLine(
+                "PicoUsbLedStripClient.exe: PicoUsbLedStripClient.exe <DisplayMode> [-c <Colors>] [-l <LoopTime>]\n"
+                + "    Send a command to the PicoUsbLedStripHost.\n"
+                + "\n"
+                + "    DisplayModes:\n"
+                + "        Solid:              Shows a static color or gradient.\n"
+                + "        Pulse:              Shows colors while pulsing from minimum to maximum brightness over looptime.\n"
+                + "        Stream:             Shows a static color or gradient without saving to flash memory. This is useful for streaming data to the PicoUsbLedStripHost.\n"
+                + "        Scroll:             Scrolls colors across the LED strip with a period of looptime.\n"
+                + "        SpectrumAnalyzer    Displays an audio spectrum analysis as brightness over the colors while the colors scroll.\n"
+                + "\n"
+                + "    Options:\n"
+                + "        -c  --colors    A comma delimited list of colors. Each color may be in hexadecimal or plaintext format (ex: green). Each color will fade into the next in a circular pattern.\n"
+                + "        -l  --looptime  A 16 bit unsigned integer representing the number of milliseconds in an animation cycle. May be in decimal or hexadecimal format (ex 512: or 0x200)."
+            );
+            return;
         }
 
         try
@@ -77,26 +110,19 @@ class PicoUsbLedStripClient
             Constants.DisplayMode displayMode = displayModes[positionalArgs[0].ToLower()];
 
             // Get colors
-            foreach (string color in parameters["colors"].Split(','))
+            if (parameters.ContainsKey("colors"))
             {
-                if (char.IsDigit(color[0]))
+                foreach (string color in parameters["colors"].Split(','))
                 {
-                    colors.Add(Color.FromArgb(Convert.ToInt32("00" + color, 16)));
+                    if (char.IsDigit(color[0]))
+                    {
+                        colors.Add(Color.FromArgb(Convert.ToInt32("00" + color, 16)));
+                    }
+                    else
+                    {
+                        colors.Add(Color.FromName(color));
+                    }
                 }
-                else
-                {
-                    colors.Add(Color.FromName(color));
-                }
-            }
-
-            // Get loopTime
-            if (parameters["loop"].StartsWith("0x"))
-            {
-                loopTime = Convert.ToUInt16(parameters["loop"], 16);
-            }
-            else
-            {
-                loopTime = Convert.ToUInt16(parameters["loop"]);
             }
 
             // Add metadata to payload
@@ -108,28 +134,66 @@ class PicoUsbLedStripClient
                     {
                         (byte)displayMode
                     };
+
+                    // Add colors to payload
+                    foreach (Color color in fadeThroughColors(Constants.LED_STRIP_LENGTH, colors.ToArray()))
+                    {
+                        payload.Add(color.R);
+                        payload.Add(color.G);
+                        payload.Add(color.B);
+                    }
+
                     break;
                 case Constants.DisplayMode.Scroll:
                 case Constants.DisplayMode.Pulse:
                 case Constants.DisplayMode.SpectrumAnalyzer:
+                    // Get loopTime
+                    if (parameters["looptime"].StartsWith("0x"))
+                    {
+                        loopTime = Convert.ToUInt16(parameters["looptime"], 16);
+                    }
+                    else
+                    {
+                        loopTime = Convert.ToUInt16(parameters["looptime"]);
+                    }
+
                     payload = new List<byte>
                     {
                         (byte)displayMode,
                         (byte)loopTime, // Pulse Speed Low
                         (byte)(loopTime >> 8), // Pulse Speed High
                     };
+
+                    // Add colors to payload
+                    foreach (Color color in fadeThroughColors(Constants.LED_STRIP_LENGTH, colors.ToArray()))
+                    {
+                        payload.Add(color.R);
+                        payload.Add(color.G);
+                        payload.Add(color.B);
+                    }
+
+                    break;
+                case Constants.DisplayMode.Config:
+
+                    // Get numLeds
+                    if (parameters["numleds"].StartsWith("0x"))
+                    {
+                        numLeds = Convert.ToUInt16(parameters["numleds"], 16);
+                    }
+                    else
+                    {
+                        numLeds = Convert.ToUInt16(parameters["numleds"]);
+                    }
+
+                    payload = new List<byte>
+                    {
+                        (byte)numLeds,
+                        (byte)(numLeds >> 8),
+                    };
                     break;
                 default:
                     payload = new List<byte>();
                     break;
-            }
-
-            // Add colors to payload
-            foreach (Color color in fadeThroughColors(Constants.LED_STRIP_LENGTH, colors.ToArray()))
-            {
-                payload.Add(color.R);
-                payload.Add(color.G);
-                payload.Add(color.B);
             }
 
             // Write data to Pico
@@ -425,4 +489,63 @@ class PicoUsbLedStripClient
 
         return parameterName;
     }
+
+    private Dictionary<string,string> GetHostConfig(SerialPort serialPort)
+    {
+        Dictionary<string, string> hostConfig = new();
+
+        List<byte> payload = new List<byte>
+        {
+            (byte)Constants.DisplayMode.GetConfig
+        };
+
+        string result = WriteToSerialPort(serialPort, payload);
+
+        if (result == Constants.SUCCESS)
+        {
+            foreach (string token in serialPort.ReadLine().Split(','))
+            {
+                string[] keyval = token.Split('=');
+
+                hostConfig.Add(keyval[0], keyval[1]);
+            }
+        }
+
+        return hostConfig;
+    }
+
+
+    //// TODO: This solution is slow. Try different approaches:
+    //// https://stackoverflow.com/questions/1483928/how-to-read-the-color-of-a-screen-pixel
+    //[DllImport("user32.dll", SetLastError = true)]
+    //public static extern IntPtr GetDesktopWindow();
+    //[DllImport("user32.dll", SetLastError = true)]
+    //public static extern IntPtr GetWindowDC(IntPtr window);
+    //[DllImport("gdi32.dll", SetLastError = true)]
+    //public static extern uint GetPixel(IntPtr dc, int x, int y);
+    //[DllImport("user32.dll", SetLastError = true)]
+    //public static extern int ReleaseDC(IntPtr window, IntPtr dc);
+
+    //public static Color GetColorAt(int x, int y)
+    //{
+    //    IntPtr desk = GetDesktopWindow();
+    //    IntPtr dc = GetWindowDC(desk);
+    //    int a = (int)GetPixel(dc, x, y);
+    //    ReleaseDC(desk, dc);
+    //    return Color.FromArgb(255, (a >> 0) & 0xff, (a >> 8) & 0xff, (a >> 16) & 0xff);
+    //}
+
+    //public static List<Color> GetScreenColors()
+    //{
+    //    List<Color> colors = new();
+    //    Rectangle screenBounds = Screen.PrimaryScreen.Bounds;
+
+    //    for (int i = 0; i < Constants.LED_STRIP_LENGTH; i++)
+    //    {
+    //        colors.Add(GetColorAt(100, 100));
+
+    //    }
+
+    //    return colors;
+    //}
 }
