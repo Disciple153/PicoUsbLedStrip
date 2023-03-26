@@ -121,8 +121,8 @@ void setLeds(WS2812 ledStrip, uint8_t* data, float* brightness, float offset);
 uint8_t antiAlias(uint8_t* data, uint16_t index, size_t length, uint8_t colorComponent, float offset);
 uint8_t getSubPixel(uint8_t* data, uint16_t index, size_t length, uint8_t colorComponent, uint16_t offset);
 void sampleAdc(ModeObject* modeObject);
-void displayModeInit(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject);
-void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject, uint8_t deltaTime);
+void displayModeInit(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject, Config* config);
+void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject, Config* config, uint8_t deltaTime);
 void spectrumAnalyzerInit(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject);
 void spectrumAnalyzerUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject, uint8_t deltaTime);
 
@@ -269,12 +269,12 @@ int main() {
                     multicore_reset_core1();
                     modeObject.threadRunning = false;
                 }
-                displayModeInit(transmission.data, ledStrip, &modeObject);
+                displayModeInit(transmission.data, ledStrip, &modeObject, config);
                 transmission.read = true;
             }
 
             // Update the display
-            displayModeUpdate(transmission.data, ledStrip, &modeObject, deltaTime_ms);
+            displayModeUpdate(transmission.data, ledStrip, &modeObject, config, deltaTime_ms);
         }
 
         // Heartbeat every second
@@ -424,7 +424,7 @@ void sampleAdc(ModeObject* modeObject)
  * @param ledStrip The LED Strip on which to display.
  * @param modeObject The ModeObject containing state data for display modes.
  */
-void displayModeInit(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject)
+void displayModeInit(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject, Config* config)
 {
     Constants::DisplayMode displayMode = (Constants::DisplayMode) (*data)[0];
     Config* config;
@@ -523,7 +523,7 @@ void displayModeInit(WritableArray* data, WS2812 ledStrip, ModeObject* modeObjec
  * @param modeObject The ModeObject containing state data for display modes.
  * @param deltaTime The time since the last time this method was called.
  */
-void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject, uint8_t deltaTime)
+void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject, Config* config, uint8_t deltaTime)
 {
     Constants::DisplayMode displayMode = (Constants::DisplayMode) (*data)[0];
     uint16_t loopTime;
