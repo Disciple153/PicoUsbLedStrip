@@ -19,7 +19,7 @@ WritableArray::WritableArray(size_t length)
 
 WritableArray::~WritableArray()
 {
-    delete[] data;
+    delete[] this->data;
 }
 
 uint8_t& WritableArray::operator[](size_t index)
