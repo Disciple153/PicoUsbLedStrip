@@ -1,0 +1,1 @@
+number of leds is only updated on the command after config
