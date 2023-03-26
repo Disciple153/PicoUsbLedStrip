@@ -21,4 +21,10 @@ public static class Constants
         Config,
         GetConfig
     };
+
+    public enum Config : byte
+    {
+        DeviceId,
+        LedStripLength
+    };
 }

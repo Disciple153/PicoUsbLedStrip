@@ -158,7 +158,7 @@ int main() {
         config->setLedStripLength(10);
 
         // On first boot initialize LED strip to white.
-        transmission.data = new WritableArray(config->ledDataLength() + 1);
+        transmission.data = new WritableArray(config->getLedDataLength() + 1);
 
         for (int i = 0; i < transmission.data->length(); i++)
             (*transmission.data)[i] = 0xFF;
@@ -175,12 +175,12 @@ int main() {
 
     config = Config::read((const uint8_t *) CONFIG_OFFSET);
 
-    if (config->ledDataLength() < 1)
+    if (config->getLedDataLength() < 1)
     {
         config->setLedStripLength(1);
         config->write((const uint8_t *) CONFIG_OFFSET);
     }
-    else if (config->ledStripLength() > 0x400)
+    else if (config->getLedStripLength() > 0x400)
     {
         config->setLedStripLength(0x400);
         config->write((const uint8_t *) CONFIG_OFFSET);
@@ -189,7 +189,7 @@ int main() {
     // INITIALIZE LED STRIP
     WS2812 ledStrip(
         LED_STRIP_PIN,
-        config->ledStripLength(),
+        config->getLedStripLength(),
         pio0,
         0,
         WS2812::FORMAT_GRB
@@ -240,8 +240,6 @@ int main() {
 
     // Read data from flash
     transmission.data = WritableArray::read((const uint8_t *) DATA_OFFSET);
-
-    printf("BOOT: %d\n", (*transmission.data)[0]);
 
     // Reset deltaTime
     currentTimeTime_us = time_us_32();
@@ -427,9 +425,6 @@ void sampleAdc(ModeObject* modeObject)
 void displayModeInit(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject, Config* config)
 {
     Constants::DisplayMode displayMode = (Constants::DisplayMode) (*data)[0];
-    Config* config;
-    WritableArray* newData;
-    uint16_t newLength;
 
     // Display based on displaymode
     switch (displayMode)
@@ -461,34 +456,11 @@ void displayModeInit(WritableArray* data, WS2812 ledStrip, ModeObject* modeObjec
         break;
 
     case (uint8_t) Constants::DisplayMode::Config:
-        newLength = (uint16_t) (*data)[1] | (uint16_t) (*data)[2] << 8;
-
-        config = new Config();
-        config->setLedStripLength(newLength);
-        config->write((const uint8_t *) CONFIG_OFFSET);
-        delete config;
-
-        newData = new WritableArray((newLength * 3) + 1);
-        (*newData)[0] = Constants::DisplayMode::Solid;
-        for (int i = 1; i < newData->length(); i++)
-        {
-            (*newData)[i] = 0x10;
-        }
-
-        (*newData)[newData->length() - 1] = 0x00;
-        (*newData)[newData->length() - 2] = 0xFF;
-        (*newData)[newData->length() - 3] = 0x00;
-
-        newData->write((const uint8_t *) DATA_OFFSET);
-
-        software_reset();
+        setConfig(data);
         break;
 
     case (uint8_t) Constants::DisplayMode::GetConfig:
-        config = Config::read((const uint8_t *) CONFIG_OFFSET);
-        printf("LED_STRIP_LENGTH=%d", config->ledStripLength());
-        printf("\n");
-        delete config;
+        getConfig(data);
         break;
     
     default:
@@ -575,6 +547,42 @@ void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObj
         ledStrip.show();
         break;
     }
+}
+
+void setConfig(WritableArray* data)
+{    
+    uint16_t newLength = (uint16_t) (*data)[1] | (uint16_t) (*data)[2] << 8;
+    char* newDeviceId = (char*) &(*data)[3];
+    WritableArray* newData = new WritableArray((newLength * 3) + 1);;
+    Config* config = new Config();
+
+    config->setLedStripLength(newLength);
+    config->setDeviceId(newDeviceId);
+    config->write((const uint8_t *) CONFIG_OFFSET);
+    delete config;
+
+    (*newData)[0] = Constants::DisplayMode::Solid;
+    for (int i = 1; i < newData->length(); i++)
+    {
+        (*newData)[i] = 0x10;
+    }
+
+    (*newData)[newData->length() - 1] = 0x00;
+    (*newData)[newData->length() - 2] = 0xFF;
+    (*newData)[newData->length() - 3] = 0x00;
+
+    newData->write((const uint8_t *) DATA_OFFSET);
+
+    software_reset();
+}
+
+void getConfig(WritableArray* data)
+{
+    Config* config = Config::read((const uint8_t *) CONFIG_OFFSET);
+    printf("%d=%d,", Constants::Config::LedStripLength, config->getLedStripLength());
+    printf("%d=%d,", Constants::Config::DeviceId, config->getDeviceId());
+    printf("\n");
+    delete config;
 }
 
 /**

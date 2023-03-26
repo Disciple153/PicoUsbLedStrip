@@ -26,15 +26,15 @@ void Config::write(const uint8_t* start)
     data->write(start);
 }
 
-uint16_t Config::ledStripLength()
+uint16_t Config::getLedStripLength()
 {
     return (uint16_t)(*this->data)[LED_STRIP_LENGTH_LOW] |
            (uint16_t)(*this->data)[LED_STRIP_LENGTH_HIGH] << 8;
 }
 
-uint16_t Config::ledDataLength()
+uint16_t Config::getLedDataLength()
 {
-    return 3 * this->ledStripLength();
+    return 3 * this->getLedStripLength();
 }
 
 void Config::setLedStripLength(uint16_t length)
@@ -44,4 +44,20 @@ void Config::setLedStripLength(uint16_t length)
 
     (*this->data)[LED_STRIP_LENGTH_LOW] = length;
     (*this->data)[LED_STRIP_LENGTH_HIGH] = length >> 8;
+}
+
+
+char* Config::getDeviceId()
+{
+    return (char*) &(*this->data)[DEVICE_ID_START];
+}
+
+void Config::setDeviceId(char* deviceId)
+{
+    int index = 0;
+    do
+    {
+        (*this->data)[index] = deviceId[index];
+    } while (deviceId[index++] != 0x00);
+    
 }
