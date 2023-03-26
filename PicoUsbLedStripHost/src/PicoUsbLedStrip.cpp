@@ -481,8 +481,6 @@ void displayModeInit(WritableArray* data, WS2812 ledStrip, ModeObject* modeObjec
 
         newData->write((const uint8_t *) DATA_OFFSET);
 
-        sleep_ms(1000);
-
         software_reset();
         break;
 
