@@ -906,7 +906,7 @@ TransmissionState transmissionStateMachine(TransmissionState state, Transmission
 
 void software_reset()
 {
-    //watchdog_reboot(0, 0, 0);
+    watchdog_reboot(0, 0, 0);
     //watchdog_enable(1, 1);
-    //while(1);
+    while(1);
 }
