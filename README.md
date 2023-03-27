@@ -81,7 +81,7 @@ PicoUsbLedStripClient.exe:
             -l  --looptime  A 16 bit unsigned integer representing the number of
                             milliseconds in an animation cycle. May be in
                             decimal or hexadecimal format (ex 512: or 0x200).
-            -i  --id        The id assigned to the PicoUsbLedStrip to which
+            -d  --deviceid  The id assigned to the PicoUsbLedStrip to which
                             the command will be sent.
 ```
 
