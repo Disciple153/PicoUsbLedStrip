@@ -1,5 +1,4 @@
-#ifndef FFT_DATA
-#define FFT_DATA
+#pragma once
 
 #include <stdio.h>
 #include "pico/types.h"
@@ -21,8 +20,8 @@ class FftData
         FftData(size_t partitionLength, size_t partitions);
         ~FftData();
 
-        uint8_t* getPartition(size_t partition);
-        uint8_t* getNextPartition();
+        uint8_t& getPartition(size_t partition);
+        uint8_t& getNextPartition();
         float average();
         size_t endIndexA();
         size_t beginIndexB();
@@ -34,4 +33,3 @@ class FftData
 };
 
 
-#endif /* FFT_DATA */

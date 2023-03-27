@@ -17,12 +17,12 @@ FftData::~FftData()
     delete[] this->sums;
 }
 
-uint8_t* FftData::getPartition(size_t partition)
+uint8_t& FftData::getPartition(size_t partition)
 {
-    return &data[this->partitionLength * (partition % this->partitions)];
+    return data[this->partitionLength * (partition % this->partitions)];
 }
 
-uint8_t* FftData::getNextPartition()
+uint8_t& FftData::getNextPartition()
 {
     this->currentPartition++;
     this->currentPartition %= this->partitions;
