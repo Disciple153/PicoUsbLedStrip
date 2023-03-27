@@ -1,5 +1,6 @@
 #include "config.hpp"
 #include <hardware/flash.h>
+#include <string.h>
 
 Config::Config()
 {
@@ -54,10 +55,5 @@ char* Config::getDeviceId()
 
 void Config::setDeviceId(char* deviceId)
 {
-    int index = 0;
-    do
-    {
-        (*this->data)[index] = deviceId[index];
-    } while (deviceId[index++] != 0x00);
-    
+    strcpy((char*) &(*this->data)[DEVICE_ID_START], deviceId);
 }

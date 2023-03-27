@@ -123,6 +123,8 @@ uint8_t getSubPixel(uint8_t* data, uint16_t index, size_t length, uint8_t colorC
 void sampleAdc(ModeObject* modeObject);
 void displayModeInit(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject, Config* config);
 void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject, Config* config, uint8_t deltaTime);
+void setConfig(WritableArray* data);
+void getConfig(WritableArray* data);
 void spectrumAnalyzerInit(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject);
 void spectrumAnalyzerUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObject, uint8_t deltaTime);
 
@@ -156,6 +158,7 @@ int main() {
         config = new Config();
 
         config->setLedStripLength(10);
+        config->setDeviceId((char*) "null");
 
         // On first boot initialize LED strip to white.
         transmission.data = new WritableArray(config->getLedDataLength() + 1);
@@ -549,6 +552,11 @@ void displayModeUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* modeObj
     }
 }
 
+/**
+ * @brief Sets the config data and reboots
+ * 
+ * @param data 
+ */
 void setConfig(WritableArray* data)
 {    
     uint16_t newLength = (uint16_t) (*data)[1] | (uint16_t) (*data)[2] << 8;
@@ -559,6 +567,8 @@ void setConfig(WritableArray* data)
     config->setLedStripLength(newLength);
     config->setDeviceId(newDeviceId);
     config->write((const uint8_t *) CONFIG_OFFSET);
+    printf("deviceId recieved: %s\n", newDeviceId);
+    printf("deviceId written: %s\n", config->getDeviceId());
     delete config;
 
     (*newData)[0] = Constants::DisplayMode::Solid;
@@ -576,11 +586,16 @@ void setConfig(WritableArray* data)
     software_reset();
 }
 
+/**
+ * @brief Prints the config data
+ * 
+ * @param data 
+ */
 void getConfig(WritableArray* data)
 {
     Config* config = Config::read((const uint8_t *) CONFIG_OFFSET);
     printf("%d=%d,", Constants::Config::LedStripLength, config->getLedStripLength());
-    printf("%d=%d,", Constants::Config::DeviceId, config->getDeviceId());
+    printf("%d=%s,", Constants::Config::DeviceId, config->getDeviceId());
     printf("\n");
     delete config;
 }
@@ -932,6 +947,10 @@ TransmissionState transmissionStateMachine(TransmissionState state, Transmission
     return state;
 }
 
+/**
+ * @brief Reboots
+ * 
+ */
 void software_reset()
 {
     watchdog_reboot(0, 0, 0);
