@@ -1,8 +1,12 @@
 ﻿// See https://aka.ms/new-console-template for more information
 using Microsoft.Win32;
+using System.Diagnostics;
 using System.Drawing;
 using System.IO.Ports;
+using System.Linq.Expressions;
+using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
+using System.Windows.Forms;
 
 class PicoUsbLedStripClient
 {
@@ -780,37 +784,37 @@ class PicoUsbLedStripClient
         }
     }
 
-    //// TODO: This solution is slow. Try different approaches:
-    //// https://stackoverflow.com/questions/1483928/how-to-read-the-color-of-a-screen-pixel
-    //[DllImport("user32.dll", SetLastError = true)]
-    //public static extern IntPtr GetDesktopWindow();
-    //[DllImport("user32.dll", SetLastError = true)]
-    //public static extern IntPtr GetWindowDC(IntPtr window);
-    //[DllImport("gdi32.dll", SetLastError = true)]
-    //public static extern uint GetPixel(IntPtr dc, int x, int y);
-    //[DllImport("user32.dll", SetLastError = true)]
-    //public static extern int ReleaseDC(IntPtr window, IntPtr dc);
+    // TODO: This solution is slow. Try different approaches:
+    // https://stackoverflow.com/questions/1483928/how-to-read-the-color-of-a-screen-pixel
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern IntPtr GetDesktopWindow();
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern IntPtr GetWindowDC(IntPtr window);
+    [DllImport("gdi32.dll", SetLastError = true)]
+    public static extern uint GetPixel(IntPtr dc, int x, int y);
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern int ReleaseDC(IntPtr window, IntPtr dc);
 
-    //public static Color GetColorAt(int x, int y)
-    //{
-    //    IntPtr desk = GetDesktopWindow();
-    //    IntPtr dc = GetWindowDC(desk);
-    //    int a = (int)GetPixel(dc, x, y);
-    //    ReleaseDC(desk, dc);
-    //    return Color.FromArgb(255, (a >> 0) & 0xff, (a >> 8) & 0xff, (a >> 16) & 0xff);
-    //}
+    public static Color GetColorAt(int x, int y)
+    {
+        IntPtr desk = GetDesktopWindow();
+        IntPtr dc = GetWindowDC(desk);
+        int a = (int)GetPixel(dc, x, y);
+        ReleaseDC(desk, dc);
+        return Color.FromArgb(255, (a >> 0) & 0xff, (a >> 8) & 0xff, (a >> 16) & 0xff);
+    }
 
-    //public static List<Color> GetScreenColors()
-    //{
-    //    List<Color> colors = new();
-    //    Rectangle screenBounds = Screen.PrimaryScreen.Bounds;
+    public static List<Color> GetScreenColors()
+    {
+        List<Color> colors = new();
+        Rectangle screenBounds = Screen.PrimaryScreen.Bounds;
 
-    //    for (int i = 0; i < Int32.Parse(hostConfig["LED_STRIP_LENGTH"]); i++)
-    //    {
-    //        colors.Add(GetColorAt(100, 100));
+        for (int i = 0; i < Int32.Parse(hostConfig["LED_STRIP_LENGTH"]); i++)
+        {
+            colors.Add(GetColorAt(100, 100));
 
-    //    }
+        }
 
-    //    return colors;
-    //}
+        return colors;
+    }
 }
