@@ -286,7 +286,7 @@ int main() {
             heartbeatTimer = 0;
         }
 
-        sleep_ms(1); // DO NOT REMOVE ¯\_(ツ)_/¯
+        //sleep_ms(1); // DO NOT REMOVE ¯\_(ツ)_/¯
     }
 }
 
@@ -666,6 +666,9 @@ void spectrumAnalyzerUpdate(WritableArray* data, WS2812 ledStrip, ModeObject* mo
     // compute fft
     kiss_fftr(modeObject->fftConfig, fftIn, fftOut);
 
+    for (int i = 0; i < ledStrip.length; i ++)
+        pixelAmplitude[i] = 0.0;
+
     // Calculate the brightness of each pixel
     for (int i = 0; i < (modeObject->dmaBuffer->length() / 2) + 1; i++)
     {
@@ -773,7 +776,7 @@ void spectrumAnalyzerUpdateLeds()
         }
 
         // Update LEDs
-        setLeds(ledStrip, &data[3], pixelBrightness, ((float)timer * ledStripLength) / loopTime);
+        setLeds(ledStrip, data, pixelBrightness, ((float)timer * ledStripLength) / loopTime);
         ledStrip.show();
         sleep_ms(1);
     }
