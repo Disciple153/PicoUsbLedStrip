@@ -15,16 +15,13 @@ class PicoUsbLedStripClient
 
     static void Main(string[] args)
     {
+        Constants.DisplayMode displayMode;
         Dictionary<string, Constants.DisplayMode> displayModes = new Dictionary<string, Constants.DisplayMode>();
-        Dictionary<string, string> parameters = new Dictionary<string, string>();
-        List<string> positionalArgs = new List<string>();
-        SerialPort? serialPort = null;
-        List<byte> payload;
-        string result;
-        ushort loopTime, numLeds;
-        int index;
+        Dictionary<string, string> parameters;
+        List<string> positionalArgs;
+        string? result = null;
 
-        // Build Dcttionary mapping strings to DisplayModes
+        // Build Dictionary mapping strings to DisplayModes
         foreach (Constants.DisplayMode mode in Enum.GetValues<Constants.DisplayMode>())
         {
             displayModes.Add(mode.ToString().ToLower(), mode);
@@ -36,44 +33,21 @@ class PicoUsbLedStripClient
             new string[] { "colors", "c" },
             new string[] { "looptime", "l" },
             new string[] { "help", "h" },
-            new string[] { "numleds", "n" }
+            new string[] { "numleds", "n" },
+            new string[] { "id", "i" },
+            new string[] { "port", "p"},
         };
 
-        // Get all command line arguments
-        index = 0;
-        while (index < args.Length)
-        {
-            string arg = args[index++];
-
-            if (arg.StartsWith("-"))
-            {
-                string parameterName = getParameterName(arg, options);
-                if (parameterName != null) 
-                { 
-                    switch (parameterName.ToLower())
-                    {
-                        default:
-                            parameters.Add(parameterName.ToLower(), args[index++]);
-                            break;
-                        case ("help"):
-                            parameters.Add(parameterName.ToLower(), "");
-                            break;
-                    }
-                }
-                else
-                {
-                    throw new Exception("Invalid option: " + arg);
-                }
-            }
-            else
-            {
-                positionalArgs.Add(arg);
-            }
-        }
+        // Parse arguments
+        (positionalArgs, parameters) = parseArgs(args, options); // TODO use out
 
         //GetScreenColors();
 
-        if (parameters.ContainsKey("help"))
+        // PARSE PARAMETERS
+        displayModes.TryGetValue(positionalArgs[0], out displayMode);
+
+
+        if (positionalArgs[0].ToLower() == "help" || parameters.ContainsKey("help") || positionalArgs.Count() < 1)
         {
             Console.WriteLine(
                 "PicoUsbLedStripClient.exe: PicoUsbLedStripClient.exe <DisplayMode> [-c <Colors>] [-l <LoopTime>]\n"
@@ -85,222 +59,151 @@ class PicoUsbLedStripClient
                 + "        Stream:             Shows a static color or gradient without saving to flash memory. This is useful for streaming data to the PicoUsbLedStripHost.\n"
                 + "        Scroll:             Scrolls colors across the LED strip with a period of looptime.\n"
                 + "        SpectrumAnalyzer    Displays an audio spectrum analysis as brightness over the colors while the colors scroll.\n"
+                + "        Config:             Applies configuration options like numleds to the Pico."
                 + "\n"
                 + "    Options:\n"
                 + "        -c  --colors    A comma delimited list of colors. Each color may be in hexadecimal or plaintext format (ex: green). Each color will fade into the next in a circular pattern.\n"
                 + "        -l  --looptime  A 16 bit unsigned integer representing the number of milliseconds in an animation cycle. May be in decimal or hexadecimal format (ex 512: or 0x200)."
+                + "        -n  --numleds   A 16 bit unsigned integer representing the number of LEDs on the LED strip."
             );
-            return;
         }
+        else if (positionalArgs[0].ToLower() == "ls")
+        {
+            GetSerialPort();
+        }
+        else if (displayMode == Constants.DisplayMode.Config)
+        {
+            result = Configure(parameters);
+        }
+        else
+        {
+            result = Display(displayMode, parameters);
+        }
+
+        if (result != null)
+        {
+            PrintResult(result);
+        }
+    }
+
+    /**************************************************************************/
+    // COMMANDS
+    /**************************************************************************/
+
+    private static string Display(Constants.DisplayMode displayMode, Dictionary<string, string> parameters)
+    {
+        AssertParameters(parameters, new string[] { "id", "colors" });
+
+        Dictionary<Constants.Config, string> hostConfig;
+        SerialPort? serialPort = null;
+        List<byte> payload = new();
+        List<Color> colors;
+        string result;
+        ushort loopTime, numLeds;
 
         try
         {
             // Get the PicoUsbLedStripHost serialPort
-            serialPort = GetSerialPort();
-
-            List<Color> colors = new List<Color>();
-
-            // Make sure serialPort was successfully found
-            if (serialPort == null || !serialPort.IsOpen)
-            {
-                throw new Exception("PicoUsbLedStripHost not found.");
-            }
-
-            // Get DisplayMode
-            Constants.DisplayMode displayMode = displayModes[positionalArgs[0].ToLower()];
-
-            // Get colors
-            if (parameters.ContainsKey("colors"))
-            {
-                foreach (string color in parameters["colors"].Split(','))
-                {
-                    if (char.IsDigit(color[0]))
-                    {
-                        colors.Add(Color.FromArgb(Convert.ToInt32("00" + color, 16)));
-                    }
-                    else
-                    {
-                        colors.Add(Color.FromName(color));
-                    }
-                }
-            }
+            serialPort = GetSerialPort(id: parameters["id"]);
+            colors = GetColors(parameters["colors"]);
+            hostConfig = GetHostConfig(serialPort);
+            numLeds = ParseUShort(hostConfig[Constants.Config.LedStripLength]);
 
             // Add metadata to payload
             switch (displayMode)
             {
                 case Constants.DisplayMode.Solid:
                 case Constants.DisplayMode.Stream:
-                    payload = new List<byte>
-                    {
-                        (byte)displayMode
-                    };
-
-                    // Add colors to payload
-                    foreach (Color color in fadeThroughColors(Constants.LED_STRIP_LENGTH, colors.ToArray()))
-                    {
-                        payload.Add(color.R);
-                        payload.Add(color.G);
-                        payload.Add(color.B);
-                    }
-
                     break;
                 case Constants.DisplayMode.Scroll:
                 case Constants.DisplayMode.Pulse:
                 case Constants.DisplayMode.SpectrumAnalyzer:
+                    AssertParameters(parameters, new string[] { "looptime" });
+
                     // Get loopTime
-                    if (parameters["looptime"].StartsWith("0x"))
-                    {
-                        loopTime = Convert.ToUInt16(parameters["looptime"], 16);
-                    }
-                    else
-                    {
-                        loopTime = Convert.ToUInt16(parameters["looptime"]);
-                    }
+                    loopTime = ParseUShort(parameters["looptime"]);
 
-                    payload = new List<byte>
-                    {
-                        (byte)displayMode,
-                        (byte)loopTime, // Pulse Speed Low
-                        (byte)(loopTime >> 8), // Pulse Speed High
-                    };
+                    payload.Add((byte)loopTime); // Pulse Speed Low
+                    payload.Add((byte)(loopTime >> 8)); // Pulse Speed Low
 
-                    // Add colors to payload
-                    foreach (Color color in fadeThroughColors(Constants.LED_STRIP_LENGTH, colors.ToArray()))
-                    {
-                        payload.Add(color.R);
-                        payload.Add(color.G);
-                        payload.Add(color.B);
-                    }
-
-                    break;
-                case Constants.DisplayMode.Config:
-
-                    // Get numLeds
-                    if (parameters["numleds"].StartsWith("0x"))
-                    {
-                        numLeds = Convert.ToUInt16(parameters["numleds"], 16);
-                    }
-                    else
-                    {
-                        numLeds = Convert.ToUInt16(parameters["numleds"]);
-                    }
-
-                    payload = new List<byte>
-                    {
-                        (byte)numLeds,
-                        (byte)(numLeds >> 8),
-                    };
                     break;
                 default:
-                    payload = new List<byte>();
-                    break;
+                    throw new Exception("How did you get here??");
+            }
+
+            // Add colors to payload
+            foreach (Color color in fadeThroughColors(numLeds, colors.ToArray()))
+            {
+                payload.Add(color.R);
+                payload.Add(color.G);
+                payload.Add(color.B);
             }
 
             // Write data to Pico
-            result = WriteToSerialPort(serialPort, payload);
+            result = WriteToSerialPort(displayMode, serialPort, payload);
 
-            // Print result
-            switch (result)
-            {
-                case Constants.SUCCESS:
-                    Console.WriteLine("Success");
-                    break;
+            // Receive any print statements
+            Debug(serialPort);
 
-                case Constants.FAILURE:
-                    Console.WriteLine("Failure");
-                    break;
-
-                case Constants.TIMEOUT:
-                    Console.WriteLine("Timeout");
-                    break;
-
-                default:
-                    Console.WriteLine("Error");
-                    break;
-            }
         }
         finally
         {
             // Close serialPort
-            if (serialPort != null && serialPort.IsOpen)
-            {
-                serialPort.Close();
-            }
+            serialPort?.Close();
         }
+
+        return result;
     }
 
-    private static Color[] fadeThroughColors(int resolution, Color[] colors)
+    private static string Configure(Dictionary<string, string> parameters)
     {
-        Color[] fade = new Color[resolution];
-        Color color1;
-        Color color2;
-        float brightness;
-        int colorIndex;
+        AssertParameters(parameters, new string[] { "numleds", "id", "com" });
 
-        for (int i = 0; i < resolution; i++)
+        SerialPort? serialPort = null;
+        string result;
+        ushort numLeds;
+        List<byte> payload;
+
+        try
         {
-            brightness = (i % ((float)resolution / colors.Length)) / (resolution / colors.Length);
-            colorIndex = (i * colors.Length) / resolution;
-            color1 = colors[colorIndex];
-
-            colorIndex++;
-
-            if (colorIndex >= colors.Length)
+            serialPort = GetSerialPort(port: parameters["com"]);
+            numLeds = ParseUShort(parameters["numleds"]);
+            payload = new List<byte>
             {
-                colorIndex = 0;
+                (byte)numLeds,
+                (byte)(numLeds >> 8),
+            };
+
+            if (numLeds < 1)
+            {
+                throw new Exception("numleds must beat least 1.");
             }
 
-            color2 = colors[colorIndex];
-
-            fade[i] = Color.FromArgb(
-                (byte)((color1.R * (1 - brightness)) + (color2.R * brightness)),
-                (byte)((color1.G * (1 - brightness)) + (color2.G * brightness)),
-                (byte)((color1.B * (1 - brightness)) + (color2.B * brightness))
-            );
-        }
-
-        return fade;
-    }
-
-    private static Color[] fadeThroughColorsCos(int resolution, Color[] colors)
-    {
-        Color[] fade = new Color[resolution];
-        Color color1;
-        Color color2;
-        float brightness;
-        int colorIndex;
-
-        for (int i = 0; i < resolution; i++)
-        {
-            brightness = (i % ((float)resolution / colors.Length)) / (resolution / colors.Length);
-            colorIndex = (i * colors.Length) / resolution;
-            color1 = colors[colorIndex];
-
-            colorIndex++;
-
-            if (colorIndex >= colors.Length)
+            foreach (char c in parameters["id"])
             {
-                colorIndex = 0;
+                payload.Add((byte)c);
             }
 
-            color2 = colors[colorIndex];
+            payload.Add(0x00);
 
-            fade[i] = Color.FromArgb(
-                (byte)((color1.R * (1 - ((Math.Cos(Math.PI * brightness) + 1) / -2))) 
-                     + (color2.R * (     (Math.Cos(Math.PI * brightness) + 1) / -2))),
+            result = WriteToSerialPort(Constants.DisplayMode.Config, serialPort, payload);
 
-                (byte)((color1.G * (1 - ((Math.Cos(Math.PI * brightness) + 1) / -2))) 
-                     + (color2.G * (     (Math.Cos(Math.PI * brightness) + 1) / -2))),
-
-                (byte)((color1.B * (1 - ((Math.Cos(Math.PI * brightness) + 1) / -2))) 
-                     + (color2.B * (     (Math.Cos(Math.PI * brightness) + 1) / -2)))
-            );
+            Debug(serialPort);
+        }
+        finally
+        {
+            // Close serialPort
+            serialPort?.Close();
         }
 
-        return fade;
+        return result;
     }
 
-    private static string WriteToSerialPort(SerialPort serialPort, List<byte> payload, int retries = 0)
+
+    /**************************************************************************/
+    // SERIAL
+    /**************************************************************************/
+    private static string WriteToSerialPort(Constants.DisplayMode displayMode, SerialPort serialPort, List<byte> payload, int retries = 0)
     {
         LinkedList<byte> rawPacket;
         List<byte> packet;
@@ -308,6 +211,8 @@ class PicoUsbLedStripClient
         byte hash;
         string response = "E";
         ushort length;
+
+        payload.Insert(0, (byte)displayMode);
 
         // Discard any garbage
         serialPort.DiscardInBuffer();
@@ -372,7 +277,7 @@ class PicoUsbLedStripClient
                 // If Timeout, retry from beginning
                 case Constants.TIMEOUT:
                     if (retries < MAX_RETRIES)
-                        return WriteToSerialPort(serialPort, payload, retries + 1);
+                        return WriteToSerialPort(displayMode, serialPort, payload, retries + 1);
                     else
                         throw new Exception("Too many retries");
 
@@ -400,7 +305,6 @@ class PicoUsbLedStripClient
             RegistryKey rk3 = rk2.OpenSubKey(s3);
             foreach (String s in rk3.GetSubKeyNames())
             {
-                //Console.WriteLine("RK3: " + s);
                 if (_rx.Match(s).Success)
                 {
                     RegistryKey rk4 = rk3.OpenSubKey(s);
@@ -419,17 +323,15 @@ class PicoUsbLedStripClient
         return comports;
     }
 
-    private static SerialPort? GetSerialPort()
+    private static SerialPort? GetSerialPort(string? id = null, string? port = null)
     {
-        string deviceName;
+        string deviceId;
         SerialPort? serialPort = null;
 
-        foreach (String portName in ComPortNames(VID, PID))
+        foreach (string portName in ComPortNames(VID, PID))
         {
-            Console.WriteLine(portName);
-
             serialPort = new SerialPort(portName);
-            serialPort.ReadTimeout = 5000;
+            serialPort.ReadTimeout = 100;
             serialPort.WriteTimeout = 1000;
             serialPort.BaudRate = 115200;
             serialPort.RtsEnable = true;
@@ -446,31 +348,165 @@ class PicoUsbLedStripClient
 
             try
             {
-                serialPort.DiscardInBuffer();
-                serialPort.Write(new byte[] { (byte)Constants.START_CODE }, 0, 1);
-                deviceName = serialPort.ReadLine().Trim('\r', '\n');
-                Console.WriteLine("Device Name: " + deviceName);
+                deviceId = GetHostConfig(serialPort)[Constants.Config.DeviceId];
 
-                if (deviceName == Constants.ROM_ID)  
+                // If neither id not port have been specified, list ports and ids.
+                if (id == null && port == null)
                 {
-                    serialPort.ReadTo(Constants.TIMEOUT + "\r\n");
+                    serialPort.Close();
+                    serialPort = null;
+                    Console.WriteLine(portName + ":" + deviceId);
+                }
+
+                // If port or id match, return the serialPort.
+                else if ((id != null && id == deviceId) ||
+                         (port != null && port == portName))
+                {
                     break;
                 }
+
+                // Try the next serialPort.
                 else
                 {
+                    serialPort.Close();
                     serialPort = null;
                 }
             }
             catch (TimeoutException)
             {
-                serialPort.Close();
+                serialPort?.Close();
                 continue;
             }
+        }
+
+        // Make sure serialPort was successfully found
+        if (id != null && (serialPort == null || !serialPort.IsOpen))
+        {
+            throw new Exception("PicoUsbLedStripHost not found.");
         }
 
         return serialPort;
     }
 
+
+    /**************************************************************************/
+    // ANIMATION
+    /**************************************************************************/
+    private static Color[] fadeThroughColors(int resolution, Color[] colors)
+    {
+        Color[] fade = new Color[resolution];
+        Color color1;
+        Color color2;
+        float brightness;
+        int colorIndex;
+
+        for (int i = 0; i < resolution; i++)
+        {
+            brightness = (i % ((float)resolution / colors.Length)) / (resolution / colors.Length);
+            colorIndex = (i * colors.Length) / resolution;
+            color1 = colors[colorIndex];
+
+            colorIndex++;
+
+            if (colorIndex >= colors.Length)
+            {
+                colorIndex = 0;
+            }
+
+            color2 = colors[colorIndex];
+
+            fade[i] = Color.FromArgb(
+                (byte)((color1.R * (1 - brightness)) + (color2.R * brightness)),
+                (byte)((color1.G * (1 - brightness)) + (color2.G * brightness)),
+                (byte)((color1.B * (1 - brightness)) + (color2.B * brightness))
+            );
+        }
+
+        return fade;
+    }
+
+    private static Color[] fadeThroughColorsCos(int resolution, Color[] colors)
+    {
+        Color[] fade = new Color[resolution];
+        Color color1;
+        Color color2;
+        float brightness;
+        int colorIndex;
+
+        for (int i = 0; i < resolution; i++)
+        {
+            brightness = (i % ((float)resolution / colors.Length)) / (resolution / colors.Length);
+            colorIndex = (i * colors.Length) / resolution;
+            color1 = colors[colorIndex];
+
+            colorIndex++;
+
+            if (colorIndex >= colors.Length)
+            {
+                colorIndex = 0;
+            }
+
+            color2 = colors[colorIndex];
+
+            fade[i] = Color.FromArgb(
+                (byte)((color1.R * (1 - ((Math.Cos(Math.PI * brightness) + 1) / -2)))
+                     + (color2.R * ((Math.Cos(Math.PI * brightness) + 1) / -2))),
+
+                (byte)((color1.G * (1 - ((Math.Cos(Math.PI * brightness) + 1) / -2)))
+                     + (color2.G * ((Math.Cos(Math.PI * brightness) + 1) / -2))),
+
+                (byte)((color1.B * (1 - ((Math.Cos(Math.PI * brightness) + 1) / -2)))
+                     + (color2.B * ((Math.Cos(Math.PI * brightness) + 1) / -2)))
+            );
+        }
+
+        return fade;
+    }
+
+
+    /**************************************************************************/
+    // PARSING
+    /**************************************************************************/
+    private static (List<string>, Dictionary<string, string>) parseArgs(string[] args, string[][] options)
+    {
+        List<string> positionalArgs = new();
+        Dictionary<string, string> parameters = new();
+        int index = 0;
+
+        // Get all command line arguments
+        while (index < args.Length)
+        {
+            string arg = args[index++];
+
+            if (arg.StartsWith("-"))
+            {
+                string parameterName = getParameterName(arg, options);
+                if (parameterName != null)
+                {
+                    switch (parameterName.ToLower())
+                    {
+                        default:
+                            parameters.Add(parameterName.ToLower(), args[index++]);
+                            break;
+                        case ("help"):
+                            parameters.Add(parameterName.ToLower(), "");
+                            break;
+                    }
+                }
+                else
+                {
+                    throw new Exception("Invalid option: " + arg);
+                }
+            }
+            else
+            {
+                positionalArgs.Add(arg);
+            }
+        }
+
+        return (positionalArgs, parameters);
+    }
+    
     private static string? getParameterName(string argument, string[][] options)
     {
         string? parameterName = null;
@@ -489,31 +525,119 @@ class PicoUsbLedStripClient
 
         return parameterName;
     }
-
-    private Dictionary<string,string> GetHostConfig(SerialPort serialPort)
+   
+    private static Dictionary<Constants.Config, string> GetHostConfig(SerialPort serialPort)
     {
-        Dictionary<string, string> hostConfig = new();
+        Dictionary<Constants.Config, string> hostConfig = new();
+        Dictionary<string, Constants.Config> configMap = new();
 
-        List<byte> payload = new List<byte>
+        foreach (Constants.Config mode in Enum.GetValues<Constants.Config>())
         {
-            (byte)Constants.DisplayMode.GetConfig
-        };
+            configMap.Add(((byte)mode).ToString(), mode);
+        }
 
-        string result = WriteToSerialPort(serialPort, payload);
+        string result = WriteToSerialPort(Constants.DisplayMode.GetConfig, serialPort, new List<byte>());
 
         if (result == Constants.SUCCESS)
         {
-            foreach (string token in serialPort.ReadLine().Split(','))
+            foreach (string token in serialPort.ReadLine().TrimEnd(',', '\r').Split(','))
             {
                 string[] keyval = token.Split('=');
 
-                hostConfig.Add(keyval[0], keyval[1]);
+                if (keyval.Length >= 2)
+                {
+                    hostConfig.Add(configMap[keyval[0]], keyval[1]);
+                }
+                else
+                {
+                    hostConfig.Add(configMap[keyval[0]], "");
+                }
             }
         }
 
         return hostConfig;
     }
 
+
+    /**************************************************************************/
+    // HELPER METHODS
+    /**************************************************************************/
+    private static void PrintResult(string? result)
+    {
+        // Print result
+        switch (result)
+        {
+            case Constants.SUCCESS:
+                Console.WriteLine("Success");
+                break;
+
+            case Constants.FAILURE:
+                Console.WriteLine("Failure");
+                break;
+
+            case Constants.TIMEOUT:
+                Console.WriteLine("Timeout");
+                break;
+
+            default:
+                Console.WriteLine("Error");
+                break;
+        }
+    }
+
+    private static ushort ParseUShort(string toParse)
+    {
+        ushort loopTime;
+        if (toParse.StartsWith("0x"))
+        {
+            loopTime = Convert.ToUInt16(toParse, 16);
+        }
+        else
+        {
+            loopTime = Convert.ToUInt16(toParse);
+        }
+
+        return loopTime;
+    }
+
+    private static List<Color> GetColors(string colorString)
+    {
+        List<Color> colors = new List<Color>();
+
+        foreach (string color in colorString.Split(','))
+        {
+            if (char.IsDigit(color[0]))
+            {
+                colors.Add(Color.FromArgb(Convert.ToInt32("00" + color, 16)));
+            }
+            else
+            {
+                colors.Add(Color.FromName(color));
+            }
+        }
+
+        return colors;
+    }
+
+    private static void Debug(SerialPort serialPort)
+    {
+        try
+        {
+            while (true) Console.WriteLine("Debug: " + serialPort.ReadLine());
+        }
+        catch (TimeoutException e) { }
+    }
+
+    private static void AssertParameters(Dictionary<string, string> parameters, string[] assertList)
+    {
+        foreach (string parameter in assertList)
+        {
+            if (!parameters.ContainsKey(parameter))
+            {
+                throw new Exception("Missing parameter: " + parameter + ".");
+            }
+        }
+    }
 
     //// TODO: This solution is slow. Try different approaches:
     //// https://stackoverflow.com/questions/1483928/how-to-read-the-color-of-a-screen-pixel
@@ -540,7 +664,7 @@ class PicoUsbLedStripClient
     //    List<Color> colors = new();
     //    Rectangle screenBounds = Screen.PrimaryScreen.Bounds;
 
-    //    for (int i = 0; i < Constants.LED_STRIP_LENGTH; i++)
+    //    for (int i = 0; i < Int32.Parse(hostConfig["LED_STRIP_LENGTH"]); i++)
     //    {
     //        colors.Add(GetColorAt(100, 100));
 
