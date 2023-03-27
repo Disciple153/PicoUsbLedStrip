@@ -567,8 +567,6 @@ void setConfig(WritableArray* data)
     config->setLedStripLength(newLength);
     config->setDeviceId(newDeviceId);
     config->write((const uint8_t *) CONFIG_OFFSET);
-    printf("deviceId recieved: %s\n", newDeviceId);
-    printf("deviceId written: %s\n", config->getDeviceId());
     delete config;
 
     (*newData)[0] = Constants::DisplayMode::Solid;
@@ -946,6 +944,7 @@ TransmissionState transmissionStateMachine(TransmissionState state, Transmission
 
     return state;
 }
+
 
 /**
  * @brief Reboots
