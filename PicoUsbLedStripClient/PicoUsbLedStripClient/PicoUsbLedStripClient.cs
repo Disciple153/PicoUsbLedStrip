@@ -51,7 +51,7 @@ class PicoUsbLedStripClient
         + "            -l  --looptime  A 16 bit unsigned integer representing the number of\n"
         + "                            milliseconds in an animation cycle. May be in\n"
         + "                            decimal or hexadecimal format (ex 512: or 0x200).\n"
-        + "            -i  --id        The id assigned to the PicoUsbLedStripHost to which\n"
+        + "            -d  --deviceid  The id assigned to the PicoUsbLedStripHost to which\n"
         + "                            the command will be sent.\n";
 
     const string VID = "2E8A";
