@@ -3,19 +3,68 @@ using Microsoft.Win32;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO.Ports;
+using System.Linq.Expressions;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
 
 class PicoUsbLedStripClient
 {
+     const string MANUAL = "PicoUsbLedStripClient.exe: \n"
+        + "    Send a command to the PicoUsbLedStripHost.\n"
+        + "\n"
+        + "\n"
+        + "    List: PicoUsbLedStripClient.exe ls\n"
+        + "\n"
+        + "        Lists all available PicoUsbLedStripHosts in portid:deviceid format.\n"
+        + "\n"
+        + "\n"
+        + "    Configure: PicoUsbLedStripClient.exe config [-p <Port>] [-d <DeviceId>] \n"
+        + "               [-n <NumLeds>]\n"
+        + "\n"
+        + "        Applies configuration options to the PicoUsbLedStripHost. This must be\n"
+        + "        run to set the number of leds on the led strip and the device id.\n"
+        + "\n"
+        + "        Options:\n"
+        + "            -p  --portid    The name of the port of the PicoUsbLedStripHost to\n"
+        + "                            be configured.\n"
+        + "            -d  --deviceid  The device id to assign to the PicoUsbLedStripHost.\n"
+        + "            -n  --numleds   A 16 bit unsigned integer representing the number of\n"
+        + "                            LEDs on the LED strip.\n"
+        + "\n"
+        + "\n"
+        + "    Display: PicoUsbLedStripClient.exe <DisplayMode> [-i <DeviceId>]\n"
+        + "             [-c <Colors>] [-l <LoopTime>]\n"
+        + "        DisplayModes:\n"
+        + "            Solid:              Shows a static color or gradient.\n"
+        + "            Pulse:              Shows colors while pulsing from minimum to\n"
+        + "                                maximum brightness over looptime.\n"
+        + "            Stream:             Shows a static color or gradient without saving\n"
+        + "                                to flash memory. This is useful for streaming \n"
+        + "                                data to the PicoUsbLedStripHost.\n"
+        + "            Scroll:             Scrolls colors across the LED strip with a\n"
+        + "                                period of looptime.\n"
+        + "            SpectrumAnalyzer:   Displays an audio spectrum analysis as\n"
+        + "                                brightness over the colors while the colors\n"
+        + "                                scroll.\n"
+        + "\n"
+        + "        Options:\n"
+        + "            -c  --colors    A comma delimited list of colors. Each color may be\n"
+        + "                            in hexadecimal or plaintext format (ex: green). Each\n"
+        + "                            color will fade into the next in a circular pattern.\n"
+        + "            -l  --looptime  A 16 bit unsigned integer representing the number of\n"
+        + "                            milliseconds in an animation cycle. May be in\n"
+        + "                            decimal or hexadecimal format (ex 512: or 0x200).\n"
+        + "            -i  --id        The id assigned to the PicoUsbLedStripHost to which\n"
+        + "                            the command will be sent.\n";
+
     const string VID = "2E8A";
     const string PID = "000A";
     const int MAX_RETRIES = 5;
 
     static void Main(string[] args)
     {
-        Constants.DisplayMode displayMode;
+        Constants.DisplayMode displayMode = Constants.DisplayMode.Solid;
         Dictionary<string, Constants.DisplayMode> displayModes = new Dictionary<string, Constants.DisplayMode>();
         Dictionary<string, string> parameters;
         List<string> positionalArgs;
@@ -34,52 +83,41 @@ class PicoUsbLedStripClient
             new string[] { "looptime", "l" },
             new string[] { "help", "h" },
             new string[] { "numleds", "n" },
-            new string[] { "id", "i" },
-            new string[] { "port", "p"},
+            new string[] { "deviceid", "d" },
+            new string[] { "portid", "p"},
         };
 
         // Parse arguments
-        (positionalArgs, parameters) = parseArgs(args, options); // TODO use out
+        (positionalArgs, parameters) = ParseArgs(args, options); // TODO use out
 
         //GetScreenColors();
 
         // PARSE PARAMETERS
-        displayModes.TryGetValue(positionalArgs[0], out displayMode);
+        if (positionalArgs.Count > 0 )
+            displayModes.TryGetValue(positionalArgs[0], out displayMode);
 
-
-        if (positionalArgs[0].ToLower() == "help" || parameters.ContainsKey("help") || positionalArgs.Count() < 1)
+        // On help or no arguments, print the manual.
+        if (parameters.ContainsKey("help") || positionalArgs[0].ToLower() == "help" || positionalArgs.Count < 1)
         {
-            Console.WriteLine(
-                "PicoUsbLedStripClient.exe: PicoUsbLedStripClient.exe <DisplayMode> [-c <Colors>] [-l <LoopTime>]\n"
-                + "    Send a command to the PicoUsbLedStripHost.\n"
-                + "\n"
-                + "    DisplayModes:\n"
-                + "        Solid:              Shows a static color or gradient.\n"
-                + "        Pulse:              Shows colors while pulsing from minimum to maximum brightness over looptime.\n"
-                + "        Stream:             Shows a static color or gradient without saving to flash memory. This is useful for streaming data to the PicoUsbLedStripHost.\n"
-                + "        Scroll:             Scrolls colors across the LED strip with a period of looptime.\n"
-                + "        SpectrumAnalyzer    Displays an audio spectrum analysis as brightness over the colors while the colors scroll.\n"
-                + "        Config:             Applies configuration options like numleds to the Pico."
-                + "\n"
-                + "    Options:\n"
-                + "        -c  --colors    A comma delimited list of colors. Each color may be in hexadecimal or plaintext format (ex: green). Each color will fade into the next in a circular pattern.\n"
-                + "        -l  --looptime  A 16 bit unsigned integer representing the number of milliseconds in an animation cycle. May be in decimal or hexadecimal format (ex 512: or 0x200)."
-                + "        -n  --numleds   A 16 bit unsigned integer representing the number of LEDs on the LED strip."
-            );
+            Console.WriteLine(MANUAL);
         }
+        // List available PicoUsbLedStripHosts.
         else if (positionalArgs[0].ToLower() == "ls")
         {
             GetSerialPort();
         }
+        // Configure PicoUsbLedStripHost.
         else if (displayMode == Constants.DisplayMode.Config)
         {
             result = Configure(parameters);
         }
+        // Display animation.
         else
         {
             result = Display(displayMode, parameters);
         }
 
+        // Print result.
         if (result != null)
         {
             PrintResult(result);
@@ -90,9 +128,16 @@ class PicoUsbLedStripClient
     // COMMANDS
     /**************************************************************************/
 
+    /// <summary>
+    /// Displays an animation on the PicoUsbLedStripHost.
+    /// </summary>
+    /// <param name="displayMode">The animation to display.</param>
+    /// <param name="parameters">A Dictionary of parameters which may be used. id, colors, and looptime may be used.</param>
+    /// <returns>The result of the transmission.</returns>
+    /// <exception cref="Exception"></exception>
     private static string Display(Constants.DisplayMode displayMode, Dictionary<string, string> parameters)
     {
-        AssertParameters(parameters, new string[] { "id", "colors" });
+        AssertParameters(parameters, new string[] { "deviceid", "colors" });
 
         Dictionary<Constants.Config, string> hostConfig;
         SerialPort? serialPort = null;
@@ -104,7 +149,7 @@ class PicoUsbLedStripClient
         try
         {
             // Get the PicoUsbLedStripHost serialPort
-            serialPort = GetSerialPort(id: parameters["id"]);
+            serialPort = GetSerialPort(deviceId: parameters["deviceid"]);
             colors = GetColors(parameters["colors"]);
             hostConfig = GetHostConfig(serialPort);
             numLeds = ParseUShort(hostConfig[Constants.Config.LedStripLength]);
@@ -132,7 +177,7 @@ class PicoUsbLedStripClient
             }
 
             // Add colors to payload
-            foreach (Color color in fadeThroughColors(numLeds, colors.ToArray()))
+            foreach (Color color in FadeThroughColors(numLeds, colors.ToArray()))
             {
                 payload.Add(color.R);
                 payload.Add(color.G);
@@ -155,9 +200,15 @@ class PicoUsbLedStripClient
         return result;
     }
 
+    /// <summary>
+    /// Sends new configuration settings to the PicoUsbLedStripHost.
+    /// </summary>
+    /// <param name="parameters">Dictionary of parameters which may be used. id, port, and numleds will be used,</param>
+    /// <returns>The result of the transmission.</returns>
+    /// <exception cref="Exception"></exception>
     private static string Configure(Dictionary<string, string> parameters)
     {
-        AssertParameters(parameters, new string[] { "numleds", "id", "com" });
+        AssertParameters(parameters, new string[] { "numleds", "deviceid", "portid" });
 
         SerialPort? serialPort = null;
         string result;
@@ -166,8 +217,10 @@ class PicoUsbLedStripClient
 
         try
         {
-            serialPort = GetSerialPort(port: parameters["com"]);
+            serialPort = GetSerialPort(portId: parameters["portid"]);
             numLeds = ParseUShort(parameters["numleds"]);
+
+            // Set the number of leds
             payload = new List<byte>
             {
                 (byte)numLeds,
@@ -179,13 +232,15 @@ class PicoUsbLedStripClient
                 throw new Exception("numleds must beat least 1.");
             }
 
-            foreach (char c in parameters["id"])
+            // Set the device id
+            foreach (char c in parameters["deviceid"])
             {
                 payload.Add((byte)c);
             }
 
             payload.Add(0x00);
 
+            // Send command
             result = WriteToSerialPort(Constants.DisplayMode.Config, serialPort, payload);
 
             Debug(serialPort);
@@ -203,6 +258,16 @@ class PicoUsbLedStripClient
     /**************************************************************************/
     // SERIAL
     /**************************************************************************/
+
+    /// <summary>
+    /// Writes an array of bytes to the PicoUsbLedStripHost along with a displayMode.
+    /// </summary>
+    /// <param name="displayMode">The command to be sent to the PicoUsbLedStripHost.</param>
+    /// <param name="serialPort">The serialPort referring to the PicoUsbLedStripHost.</param>
+    /// <param name="payload">Any bytes of data to be sent with the command.</param>
+    /// <param name="retries">The number of retries so far.</param>
+    /// <returns>The result of the transmission.</returns>
+    /// <exception cref="Exception"></exception>
     private static string WriteToSerialPort(Constants.DisplayMode displayMode, SerialPort serialPort, List<byte> payload, int retries = 0)
     {
         LinkedList<byte> rawPacket;
@@ -291,6 +356,12 @@ class PicoUsbLedStripClient
     }
 
     // FIXME Windows only
+    /// <summary>
+    /// Returns a list of COM port names with the given VID and PID.
+    /// </summary>
+    /// <param name="VID">Vendor ID.</param>
+    /// <param name="PID">Product ID.</param>
+    /// <returns>A list of COM port names.</returns>
     static List<string> ComPortNames(String VID, String PID)
     {
         String pattern = String.Format("^VID_{0}.PID_{1}", VID, PID);
@@ -323,19 +394,28 @@ class PicoUsbLedStripClient
         return comports;
     }
 
-    private static SerialPort? GetSerialPort(string? id = null, string? port = null)
+    /// <summary>
+    /// Returns the serial port with the matching deviceId or portId. If none are provided, all available device portIds and deviceIds are printed and null is returned.
+    /// </summary>
+    /// <param name="deviceId">The Id assigned to a PicoUsbLedStripHost.</param>
+    /// <param name="portId">The com port id of a PicoUsbLedStripHost.</param>
+    /// <returns>The desired SerialPort or null.</returns>
+    /// <exception cref="Exception"></exception>
+    private static SerialPort? GetSerialPort(string? deviceId = null, string? portId = null)
     {
-        string deviceId;
+        string receivedDeviceId;
         SerialPort? serialPort = null;
 
-        foreach (string portName in ComPortNames(VID, PID))
+        foreach (string receivedPortId in ComPortNames(VID, PID))
         {
-            serialPort = new SerialPort(portName);
-            serialPort.ReadTimeout = 100;
-            serialPort.WriteTimeout = 1000;
-            serialPort.BaudRate = 115200;
-            serialPort.RtsEnable = true;
-            serialPort.DtrEnable = true;
+            serialPort = new SerialPort(receivedPortId)
+            {
+                ReadTimeout = 100,
+                WriteTimeout = 1000,
+                BaudRate = 115200,
+                RtsEnable = true,
+                DtrEnable = true
+            };
 
             try
             {
@@ -348,19 +428,19 @@ class PicoUsbLedStripClient
 
             try
             {
-                deviceId = GetHostConfig(serialPort)[Constants.Config.DeviceId];
+                receivedDeviceId = GetHostConfig(serialPort)[Constants.Config.DeviceId];
 
                 // If neither id not port have been specified, list ports and ids.
-                if (id == null && port == null)
+                if (deviceId == null && portId == null)
                 {
                     serialPort.Close();
                     serialPort = null;
-                    Console.WriteLine(portName + ":" + deviceId);
+                    Console.WriteLine(receivedPortId + ":" + receivedDeviceId);
                 }
 
                 // If port or id match, return the serialPort.
-                else if ((id != null && id == deviceId) ||
-                         (port != null && port == portName))
+                else if ((deviceId != null && deviceId == receivedDeviceId) ||
+                         (portId != null && portId == receivedPortId))
                 {
                     break;
                 }
@@ -380,9 +460,16 @@ class PicoUsbLedStripClient
         }
 
         // Make sure serialPort was successfully found
-        if (id != null && (serialPort == null || !serialPort.IsOpen))
+        if (deviceId != null && portId != null && (serialPort == null || !serialPort.IsOpen))
         {
-            throw new Exception("PicoUsbLedStripHost not found.");
+            if (portId != null)
+            {
+                throw new Exception("Device with PortId: " + portId + " not found.");
+            }
+            else
+            {
+                throw new Exception("Device with DeviceId: " + deviceId + " not found.");
+            }
         }
 
         return serialPort;
@@ -392,7 +479,13 @@ class PicoUsbLedStripClient
     /**************************************************************************/
     // ANIMATION
     /**************************************************************************/
-    private static Color[] fadeThroughColors(int resolution, Color[] colors)
+    /// <summary>
+    /// Returns a list of Colors which fades through a list of colors in a linear fashion as if the list is circular.
+    /// </summary>
+    /// <param name="resolution">The length of the resulting list of colors.</param>
+    /// <param name="colors">The list of colors to fade through.</param>
+    /// <returns>The resulting gradient.</returns>
+    private static Color[] FadeThroughColors(int resolution, Color[] colors)
     {
         Color[] fade = new Color[resolution];
         Color color1;
@@ -425,7 +518,13 @@ class PicoUsbLedStripClient
         return fade;
     }
 
-    private static Color[] fadeThroughColorsCos(int resolution, Color[] colors)
+    /// <summary>
+    /// Returns a list of Colors which fades through a list of colors in a cosine fashion as if the list is circular.
+    /// </summary>
+    /// <param name="resolution">The length of the resulting list of colors.</param>
+    /// <param name="colors">The list of colors to fade through.</param>
+    /// <returns>The resulting gradient.</returns>
+    private static Color[] FadeThroughColorsCos(int resolution, Color[] colors)
     {
         Color[] fade = new Color[resolution];
         Color color1;
@@ -467,11 +566,19 @@ class PicoUsbLedStripClient
     /**************************************************************************/
     // PARSING
     /**************************************************************************/
-    private static (List<string>, Dictionary<string, string>) parseArgs(string[] args, string[][] options)
+    /// <summary>
+    /// Parses through command line input and returns a list and a dictionary of the result.
+    /// </summary>
+    /// <param name="args">The command line input.</param>
+    /// <param name="options">The possible arguments.</param>
+    /// <returns>A list of positional arguments, and a Dictionary of parameters.</returns>
+    /// <exception cref="Exception"></exception>
+    private static (List<string>, Dictionary<string, string>) ParseArgs(string[] args, string[][] options)
     {
         List<string> positionalArgs = new();
         Dictionary<string, string> parameters = new();
         int index = 0;
+        string? parameterName;
 
         // Get all command line arguments
         while (index < args.Length)
@@ -480,7 +587,8 @@ class PicoUsbLedStripClient
 
             if (arg.StartsWith("-"))
             {
-                string parameterName = getParameterName(arg, options);
+                parameterName = GetParameterName(arg, options);
+
                 if (parameterName != null)
                 {
                     switch (parameterName.ToLower())
@@ -506,8 +614,14 @@ class PicoUsbLedStripClient
 
         return (positionalArgs, parameters);
     }
-    
-    private static string? getParameterName(string argument, string[][] options)
+
+    /// <summary>
+    /// Given an argument and a set op possible arguments, returns the standard name of the argument.
+    /// </summary>
+    /// <param name="argument">The argument to be analyzed.</param>
+    /// <param name="options">The possible arguments.</param>
+    /// <returns>The standard name of the argument.</returns>
+    private static string? GetParameterName(string argument, string[][] options)
     {
         string? parameterName = null;
         int index = 0;
@@ -525,7 +639,12 @@ class PicoUsbLedStripClient
 
         return parameterName;
     }
-   
+
+    /// <summary>
+    /// Gets the config data from the PicoUsbLedStripHost.
+    /// </summary>
+    /// <param name="serialPort">The serialPort referring to the PicoUsbLedStripHost.</param>
+    /// <returns>A Dictionary which maps the config data</returns>
     private static Dictionary<Constants.Config, string> GetHostConfig(SerialPort serialPort)
     {
         Dictionary<Constants.Config, string> hostConfig = new();
@@ -562,6 +681,10 @@ class PicoUsbLedStripClient
     /**************************************************************************/
     // HELPER METHODS
     /**************************************************************************/
+    /// <summary>
+    /// Prints a human readable result based on the result returned from WriteToSerialPort.
+    /// </summary>
+    /// <param name="result">The result returned from WriteToSerialPort.</param>
     private static void PrintResult(string? result)
     {
         // Print result
@@ -585,6 +708,11 @@ class PicoUsbLedStripClient
         }
     }
 
+    /// <summary>
+    /// Parses a string formatted as either decimal or hexadecimal to a ushort.
+    /// </summary>
+    /// <param name="toParse">A decimal or hexadecimal integer.</param>
+    /// <returns>A ushort.</returns>
     private static ushort ParseUShort(string toParse)
     {
         ushort loopTime;
@@ -600,6 +728,11 @@ class PicoUsbLedStripClient
         return loopTime;
     }
 
+    /// <summary>
+    /// Returns a list of Colors bases on a comma delimited string of English or hexadecimal colors.
+    /// </summary>
+    /// <param name="colorString">A comma delimited string of English or hexadecimal colors.</param>
+    /// <returns>A list of Colors.</returns>
     private static List<Color> GetColors(string colorString)
     {
         List<Color> colors = new List<Color>();
@@ -619,15 +752,27 @@ class PicoUsbLedStripClient
         return colors;
     }
 
+    /// <summary>
+    /// Accepts and prints stdin from the serialPort until the serialPort times out.
+    /// </summary>
+    /// <param name="serialPort">The serialPort referring to the PicoUsbLedStripHost.</param>
     private static void Debug(SerialPort serialPort)
     {
         try
         {
             while (true) Console.WriteLine("Debug: " + serialPort.ReadLine());
         }
-        catch (TimeoutException e) { }
+        catch (TimeoutException) { }
+        catch (OperationCanceledException) { }
+
     }
 
+    /// <summary>
+    /// Given a list of parameter names, asserts that they exist in the parameter Dictionary.
+    /// </summary>
+    /// <param name="parameters">The parameter Dictionary.</param>
+    /// <param name="assertList">A list of parameters to be asserted.</param>
+    /// <exception cref="Exception"></exception>
     private static void AssertParameters(Dictionary<string, string> parameters, string[] assertList)
     {
         foreach (string parameter in assertList)
