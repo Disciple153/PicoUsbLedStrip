@@ -10,20 +10,20 @@ This project creates a uses a Raspberry Pi Pico to create an LED controller with
 - Spectrum Analyzer
 
 ## **Usage**
-To get started, download [PicoUsbLedStripHost.uf2](https://github.com/Disciple153/PicoUsbLedStrip/releases/latest/download/PicoUsbLedStripHost.uf2) and [PicoUsbLedStripClient.exe](https://github.com/Disciple153/PicoUsbLedStrip/releases/latest/download/PicoUsbLedStripClient.exe). 
+To get started, download [PicoUsbLedStrip.uf2](https://github.com/Disciple153/PicoUsbLedStrip/releases/latest/download/PicoUsbLedStrip.uf2) and [PicoUsbLedStripClient.exe](https://github.com/Disciple153/PicoUsbLedStrip/releases/latest/download/PicoUsbLedStripClient.exe). 
 
-### **Flashing PicoUsbLedStripHost**
+### **Flashing PicoUsbLedStrip**
 Put Pico into USB Mass Storage Mode by holding the `BOOTSEL` buttton while plugging it in, then release `BOOTSEL`.
 
 Copy PicoUsbLedStrip.uf2 onto the Pico.
 
 ### **First time set up**
-With the PicoUsbLedStripHost plugged into your PC, do the following.
+With the PicoUsbLedStrip plugged into your PC, do the following.
 
-To find the PicoUsbLedStripHost, run `PicoUsbLedStripClient.exe ls`.
+To find the PicoUsbLedStrip, run `PicoUsbLedStripClient.exe ls`.
 This will print the PortId and DeviceId in this format: `PortId:DeviceId`. 
 
-Next you need to set the number of LEDs on your LED strip and give your PicoUsbLedStripHost a name.
+Next you need to set the number of LEDs on your LED strip and give your PicoUsbLedStrip a name.
 To do this run `PicoUsbLedStripClient.exe config -p PortId -d <DeviceId> -n <NumLeds>`.
 Run this command, adjusting the value of NumLeds, until your LED strip displays exactly one green led on the last pixel.
 
@@ -37,24 +37,24 @@ Example Commands:
 
 ```
 PicoUsbLedStripClient.exe: 
-    Send a command to the PicoUsbLedStripHost.
+    Send a command to the PicoUsbLedStrip.
 
 
     List: PicoUsbLedStripClient.exe ls
 
-        Lists all available PicoUsbLedStripHosts in portid:deviceid format.
+        Lists all available PicoUsbLedStrips in portid:deviceid format.
 
 
     Configure: PicoUsbLedStripClient.exe config [-p <Port>] [-d <DeviceId>] 
                [-n <NumLeds>]
 
-        Applies configuration options to the PicoUsbLedStripHost. This must be
+        Applies configuration options to the PicoUsbLedStrip. This must be
         run to set the number of leds on the led strip and the device id.
 
         Options:
-            -p  --portid    The name of the port of the PicoUsbLedStripHost to
+            -p  --portid    The name of the port of the PicoUsbLedStrip to
                             be configured.
-            -d  --deviceid  The device id to assign to the PicoUsbLedStripHost.
+            -d  --deviceid  The device id to assign to the PicoUsbLedStrip.
             -n  --numleds   A 16 bit unsigned integer representing the number of
                             LEDs on the LED strip.
 
@@ -67,7 +67,7 @@ PicoUsbLedStripClient.exe:
                                 maximum brightness over looptime.
             Stream:             Shows a static color or gradient without saving
                                 to flash memory. This is useful for streaming 
-                                data to the PicoUsbLedStripHost.
+                                data to the PicoUsbLedStrip.
             Scroll:             Scrolls colors across the LED strip with a
                                 period of looptime.
             SpectrumAnalyzer:   Displays an audio spectrum analysis as
@@ -81,7 +81,7 @@ PicoUsbLedStripClient.exe:
             -l  --looptime  A 16 bit unsigned integer representing the number of
                             milliseconds in an animation cycle. May be in
                             decimal or hexadecimal format (ex 512: or 0x200).
-            -i  --id        The id assigned to the PicoUsbLedStripHost to which
+            -i  --id        The id assigned to the PicoUsbLedStrip to which
                             the command will be sent.
 ```
 

@@ -1,12 +1,8 @@
 ﻿// See https://aka.ms/new-console-template for more information
 using Microsoft.Win32;
-using System.Diagnostics;
 using System.Drawing;
 using System.IO.Ports;
-using System.Linq.Expressions;
-using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
-using System.Windows.Forms;
 
 class PicoUsbLedStripClient
 {
