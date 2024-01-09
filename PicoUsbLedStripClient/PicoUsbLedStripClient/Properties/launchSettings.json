@@ -2,11 +2,7 @@
   "profiles": {
     "PicoUsbLedStripClient": {
       "commandName": "Project",
-      "commandLineArgs": "scroll -d DeskDisplay -c 8000FF,8000FF,green,green -l 0x3000",
-      //"commandLineArgs": "solid -d DeskDisplay -c red"
-      //"commandLineArgs": "ls",
-      //"commandLineArgs": "config -n 98 -d DeskDisplay -p COM8"
-      //"commandLineArgs": "--help"
+      "commandLineArgs": "scroll -d DeskDisplay2 -c FF00FF -l 0x3000"
     }
   }
 }

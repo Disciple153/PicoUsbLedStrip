@@ -3,6 +3,7 @@
 This project creates a uses a Raspberry Pi Pico to create an LED controller with a USB interface to PC.
 
 ## **Supported Animations**
+
 - Solid
 - Stream
 - Scroll
@@ -10,18 +11,27 @@ This project creates a uses a Raspberry Pi Pico to create an LED controller with
 - Spectrum Analyzer
 
 ## **Usage**
-To get started, download [PicoUsbLedStrip.uf2](https://github.com/Disciple153/PicoUsbLedStrip/releases/latest/download/PicoUsbLedStrip.uf2) and [PicoUsbLedStripClient.exe](https://github.com/Disciple153/PicoUsbLedStrip/releases/latest/download/PicoUsbLedStripClient.exe). 
+
+To get started, download [PicoUsbLedStrip.uf2](https://github.com/Disciple153/PicoUsbLedStrip/releases/latest/download/PicoUsbLedStrip.uf2) and [PicoUsbLedStripClient.exe](https://github.com/Disciple153/PicoUsbLedStrip/releases/latest/download/PicoUsbLedStripClient.exe).
 
 ### **Flashing PicoUsbLedStrip**
+
 Put Pico into USB Mass Storage Mode by holding the `BOOTSEL` buttton while plugging it in, then release `BOOTSEL`.
 
 Copy PicoUsbLedStrip.uf2 onto the Pico.
 
 ### **First time set up**
+
 With the PicoUsbLedStrip plugged into your PC, do the following.
 
 To find the PicoUsbLedStrip, run `PicoUsbLedStripClient.exe ls`.
-This will print the PortId and DeviceId in this format: `PortId:DeviceId`. 
+This will print the PortId and DeviceId in this format: `PortId:DeviceId`.
+If the name has not yet been set, it will appear as `null`.
+
+```bash
+$ PicoUsbLedStripClient.exe ls
+COM3:null
+```
 
 Next you need to set the number of LEDs on your LED strip and give your PicoUsbLedStrip a name.
 To do this run `PicoUsbLedStripClient.exe config -p PortId -d <DeviceId> -n <NumLeds>`.
@@ -30,13 +40,14 @@ Run this command, adjusting the value of NumLeds, until your LED strip displays 
 ### **Running PicoUsbLedStripClient**
 
 Example Commands:
+
 - Solid red: `PicoUsbLedStripClient.exe solid -d <DeviceId> -c red`
 - Scrolling rainbow: `PicoUsbLedStripClient.exe scroll -d <DeviceId> -l 0x3000 -c FF0000,FFFF00,00FF00,00FFFF,0000FF,FF00FF`
 
 ### **Manual**
 
 ```
-PicoUsbLedStripClient.exe: 
+PicoUsbLedStripClient.exe:
     Send a command to the PicoUsbLedStrip.
 
 
@@ -45,7 +56,7 @@ PicoUsbLedStripClient.exe:
         Lists all available PicoUsbLedStrips in portid:deviceid format.
 
 
-    Configure: PicoUsbLedStripClient.exe config [-p <Port>] [-d <DeviceId>] 
+    Configure: PicoUsbLedStripClient.exe config [-p <Port>] [-d <DeviceId>]
                [-n <NumLeds>]
 
         Applies configuration options to the PicoUsbLedStrip. This must be
@@ -66,7 +77,7 @@ PicoUsbLedStripClient.exe:
             Pulse:              Shows colors while pulsing from minimum to
                                 maximum brightness over looptime.
             Stream:             Shows a static color or gradient without saving
-                                to flash memory. This is useful for streaming 
+                                to flash memory. This is useful for streaming
                                 data to the PicoUsbLedStrip.
             Scroll:             Scrolls colors across the LED strip with a
                                 period of looptime.
@@ -85,7 +96,7 @@ PicoUsbLedStripClient.exe:
                             the command will be sent.
 ```
 
-
 ## **Wiring Diagram**
+
 ![Wiring diagram](images/PicoUsbLedStrip.drawio.png)
 Connecting the TRS (aux) cable is optional, and will enable the Spectrum Analyzer function.

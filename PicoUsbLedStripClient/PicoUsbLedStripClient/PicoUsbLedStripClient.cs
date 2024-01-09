@@ -735,13 +735,13 @@ class PicoUsbLedStripClient
 
         foreach (string color in colorString.Split(','))
         {
-            if (char.IsDigit(color[0]))
+            if (Color.FromName(color).IsKnownColor)
             {
-                colors.Add(Color.FromArgb(Convert.ToInt32("00" + color, 16)));
+                colors.Add(Color.FromName(color));
             }
             else
             {
-                colors.Add(Color.FromName(color));
+                colors.Add(Color.FromArgb(Convert.ToInt32("00" + color, 16)));
             }
         }
 
